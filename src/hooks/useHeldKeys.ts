@@ -20,6 +20,13 @@ export function useHeldKeys(enabled = true) {
     const onDown = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
       if (!MOVEMENT_KEYS.has(key)) return;
+      const target = e.target as HTMLElement | null;
+      const isTypingTarget =
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.tagName === "SELECT" ||
+        !!target?.closest("[contenteditable='true']");
+      if (isTypingTarget) return;
       e.preventDefault();
       held.current.add(key);
     };

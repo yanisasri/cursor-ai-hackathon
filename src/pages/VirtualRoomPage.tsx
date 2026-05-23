@@ -16,6 +16,7 @@ export function VirtualRoomPage() {
   const { user, rooms, ensureRoomSetup } = useApp();
   const [activeSubRoom, setActiveSubRoom] = useState<SubRoomType>("living");
   const [panelOpen, setPanelOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     if (roomId) ensureRoomSetup(roomId);
@@ -104,6 +105,18 @@ export function VirtualRoomPage() {
                 {s.label.split(" ")[0]}
               </button>
             ))}
+            <button
+              type="button"
+              onClick={() => {
+                setSettingsOpen(!settingsOpen);
+                setPanelOpen(true);
+              }}
+              className={`rounded-lg px-3 py-1 text-xs font-medium ${
+                settingsOpen ? "bg-cozy-800 text-white" : "bg-cozy-200 text-cozy-800"
+              }`}
+            >
+              Settings
+            </button>
           </div>
         </div>
 
@@ -117,9 +130,9 @@ export function VirtualRoomPage() {
               onEnterSubRoom={(zone) => {
                 setActiveSubRoom(zone);
                 setPanelOpen(true);
+                setSettingsOpen(false);
               }}
             />
-            <RoomNicknamesPanel roomId={room.id} memberIds={displayMemberIds} />
             <div className="mt-4">
               <ChatPanel roomId={room.id} />
             </div>
@@ -134,7 +147,11 @@ export function VirtualRoomPage() {
               {panelOpen ? "Hide" : "Show"} room tools
             </button>
             <div className={panelOpen ? "block" : "hidden lg:block"}>
-              {renderPanel()}
+              {settingsOpen ? (
+                <RoomNicknamesPanel roomId={room.id} memberIds={displayMemberIds} />
+              ) : (
+                renderPanel()
+              )}
             </div>
           </div>
         </div>

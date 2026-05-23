@@ -14,6 +14,9 @@ export function SuggestionsPanel({ roomId }: { roomId: string }) {
     likeSuggestion,
     getWeeklyTopSuggestions,
     getArchivedSuggestions,
+    suggestionCategoriesByRoom,
+    addSuggestionCategory,
+    removeSuggestionCategoryIfEmpty,
   } = useApp();
 
   const [tab, setTab] = useState<Tab>("board");
@@ -21,7 +24,19 @@ export function SuggestionsPanel({ roomId }: { roomId: string }) {
   const [description, setDescription] = useState("");
   const [link, setLink] = useState("");
   const [category, setCategory] = useState<SuggestionCategory>("restaurant");
+  const [customCategory, setCustomCategory] = useState("");
+  const [categoryMsg, setCategoryMsg] = useState("");
   const [imagePreview, setImagePreview] = useState<string | undefined>();
+
+  const customCategories = suggestionCategoriesByRoom[roomId] ?? [];
+  const categoryOptions = [
+    ...SUGGESTION_CATEGORIES,
+    ...customCategories.map((c) => ({
+      id: c,
+      label: c[0].toUpperCase() + c.slice(1),
+      emoji: "🏷️",
+    })),
+  ];
 
   const active = useMemo(
     () =>
@@ -36,14 +51,15 @@ export function SuggestionsPanel({ roomId }: { roomId: string }) {
 
   const byCategory = useMemo(() => {
     const map = new Map<SuggestionCategory, typeof active>();
-    for (const cat of SUGGESTION_CATEGORIES) {
-      map.set(
-        cat.id,
-        active.filter((s) => s.category === cat.id)
-      );
+    const allIds = new Set<SuggestionCategory>([
+      ...categoryOptions.map((c) => c.id),
+      ...active.map((s) => s.category),
+    ]);
+    for (const id of allIds) {
+      map.set(id, active.filter((s) => s.category === id));
     }
     return map;
-  }, [active]);
+  }, [active, categoryOptions]);
 
   const handleImage = (file: File | null) => {
     if (!file) {
@@ -93,7 +109,7 @@ export function SuggestionsPanel({ roomId }: { roomId: string }) {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <span className="text-xs font-semibold uppercase text-plum-600">
-              {SUGGESTION_CATEGORIES.find((c) => c.id === s.category)?.emoji}{" "}
+              {(categoryOptions.find((c) => c.id === s.category)?.emoji ?? "🏷️")}{" "}
               {s.category}
             </span>
             <p className="mt-1 text-base font-semibold leading-snug text-cozy-900">
@@ -191,12 +207,36 @@ export function SuggestionsPanel({ roomId }: { roomId: string }) {
                 value={category}
                 onChange={(e) => setCategory(e.target.value as SuggestionCategory)}
               >
-                {SUGGESTION_CATEGORIES.map((c) => (
+                {categoryOptions.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.emoji} {c.label}
                   </option>
                 ))}
               </select>
+              {category === "other" && (
+                <div className="flex w-full gap-2 sm:w-auto">
+                  <input
+                    className="input-field"
+                    placeholder="New category name"
+                    value={customCategory}
+                    onChange={(e) => setCustomCategory(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="btn-secondary whitespace-nowrap text-sm"
+                    onClick={() => {
+                      const name = customCategory.trim().toLowerCase();
+                      if (!name) return;
+                      addSuggestionCategory(roomId, name);
+                      setCategory(name);
+                      setCustomCategory("");
+                      setCategoryMsg(`Created category "${name}"`);
+                    }}
+                  >
+                    Create category
+                  </button>
+                </div>
+              )}
               <label className="cursor-pointer rounded-lg border border-cozy-300 px-4 py-2 text-sm hover:bg-cozy-50">
                 📷 Add photo
                 <input
@@ -217,9 +257,45 @@ export function SuggestionsPanel({ roomId }: { roomId: string }) {
                 className="h-24 rounded-lg object-cover"
               />
             )}
+            <div className="rounded-lg border border-cozy-200 bg-cozy-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-cozy-600">
+                Manage custom categories
+              </p>
+              {customCategories.length === 0 ? (
+                <p className="mt-1 text-sm text-cozy-500">
+                  No custom categories yet.
+                </p>
+              ) : (
+                <ul className="mt-2 space-y-1">
+                  {customCategories.map((name) => (
+                    <li key={name} className="flex items-center justify-between rounded bg-white px-2 py-1 text-sm">
+                      <span className="capitalize">{name}</span>
+                      <button
+                        type="button"
+                        className="rounded px-2 py-0.5 text-xs text-red-600 hover:bg-red-50"
+                        onClick={() => {
+                          const ok = removeSuggestionCategoryIfEmpty(roomId, name);
+                          setCategoryMsg(
+                            ok
+                              ? `Deleted category "${name}"`
+                              : `Cannot delete "${name}" because it still has suggestions.`
+                          );
+                          if (ok && category === name) {
+                            setCategory("restaurant");
+                          }
+                        }}
+                      >
+                        Delete if empty
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {categoryMsg && <p className="mt-2 text-xs text-plum-700">{categoryMsg}</p>}
+            </div>
           </div>
 
-          {SUGGESTION_CATEGORIES.map((cat) => {
+          {categoryOptions.map((cat) => {
             const items = byCategory.get(cat.id) ?? [];
             if (items.length === 0) return null;
             return (

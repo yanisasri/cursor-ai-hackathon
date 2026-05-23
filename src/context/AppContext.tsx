@@ -21,6 +21,7 @@ import {
   getRooms,
   getSessionUserId,
   getSuggestions,
+  getSuggestionCategoriesByRoom,
   getUsers,
   saveCalendarConnections,
   saveCalendarEvents,
@@ -32,6 +33,7 @@ import {
   saveRoomNicknames,
   saveRooms,
   saveSuggestions,
+  saveSuggestionCategoriesByRoom,
   saveUsers,
   linkExistingDemoFriends,
   seedDemoFriends,
@@ -65,6 +67,7 @@ interface AppContextValue {
   calendarConnections: CalendarConnection[];
   polls: Poll[];
   suggestions: Suggestion[];
+  suggestionCategoriesByRoom: Record<string, string[]>;
   notifications: Notification[];
   roomNicknames: RoomNickname[];
   nicknameRequests: NicknameRequest[];
@@ -92,6 +95,8 @@ interface AppContextValue {
   refresh: () => void;
   addCalendarSlot: (slot: Omit<CalendarSlot, "id">) => void;
   addCalendarEvent: (event: Omit<CalendarEvent, "id">) => void;
+  createCalendarEventRequest: (event: Omit<CalendarEvent, "id">) => void;
+  rsvpCalendarEvent: (eventId: string, join: boolean) => void;
   connectGoogleCalendar: () => void;
   connectAppleCalendar: () => void;
   createPoll: (roomId: string, question: string, options: string[]) => void;
@@ -103,6 +108,8 @@ interface AppContextValue {
     link?: string;
     imageUrl?: string;
   }) => void;
+  addSuggestionCategory: (roomId: string, categoryName: string) => void;
+  removeSuggestionCategoryIfEmpty: (roomId: string, categoryName: string) => boolean;
   deleteSuggestion: (id: string) => void;
   likeSuggestion: (id: string) => void;
   getWeeklyTopSuggestions: (roomId: string) => Suggestion[];
@@ -131,6 +138,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [calendarConnections, setCalendarConnections] = useState<CalendarConnection[]>([]);
   const [polls, setPolls] = useState<Poll[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [suggestionCategoriesByRoom, setSuggestionCategoriesByRoom] = useState<
+    Record<string, string[]>
+  >({});
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [roomNicknames, setRoomNicknames] = useState<RoomNickname[]>([]);
   const [nicknameRequests, setNicknameRequests] = useState<NicknameRequest[]>([]);
@@ -146,6 +156,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setCalendarConnections(getCalendarConnections());
     setPolls(getPolls());
     setSuggestions(getSuggestions());
+    setSuggestionCategoriesByRoom(getSuggestionCategoriesByRoom());
     setNotifications(getNotifications());
     setRoomNicknames(getRoomNicknames());
     setNicknameRequests(getNicknameRequests());
@@ -365,6 +376,53 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [loadAll]
   );
 
+  const createCalendarEventRequest = useCallback(
+    (event: Omit<CalendarEvent, "id">) => {
+      const request: CalendarEvent = {
+        ...event,
+        id: generateId(),
+        status: "pending",
+        rsvpUserIds: [],
+        syncedToGoogleUserIds: [],
+        syncedToAppleUserIds: [],
+      };
+      saveCalendarEvents([...getCalendarEvents(), request]);
+      loadAll();
+    },
+    [loadAll]
+  );
+
+  const rsvpCalendarEvent = useCallback(
+    (eventId: string, join: boolean) => {
+      if (!user) return;
+      const updated: CalendarEvent[] = getCalendarEvents().map((e): CalendarEvent => {
+        if (e.id !== eventId) return e;
+        const current = e.rsvpUserIds ?? [];
+        const nextRsvps = join
+          ? [...new Set([...current, user.id])]
+          : current.filter((id) => id !== user.id);
+        const isConfirmed = nextRsvps.length > 0;
+        const userConn = getCalendarConnections().find((c) => c.userId === user.id);
+        return {
+          ...e,
+          status: isConfirmed ? "confirmed" : "pending",
+          rsvpUserIds: nextRsvps,
+          syncedToGoogleUserIds:
+            join && userConn?.googleConnected
+              ? [...new Set([...(e.syncedToGoogleUserIds ?? []), user.id])]
+              : e.syncedToGoogleUserIds ?? [],
+          syncedToAppleUserIds:
+            join && userConn?.appleConnected
+              ? [...new Set([...(e.syncedToAppleUserIds ?? []), user.id])]
+              : e.syncedToAppleUserIds ?? [],
+        };
+      });
+      saveCalendarEvents(updated);
+      loadAll();
+    },
+    [user, loadAll]
+  );
+
   const connectGoogleCalendar = useCallback(() => {
     if (!user) return;
     const all = getCalendarConnections();
@@ -482,6 +540,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
       loadAll();
     },
     [user, loadAll]
+  );
+
+  const addSuggestionCategory = useCallback(
+    (roomId: string, categoryName: string) => {
+      const normalized = categoryName.trim().toLowerCase();
+      if (!normalized) return;
+      const all = getSuggestionCategoriesByRoom();
+      const existing = all[roomId] ?? [];
+      if (existing.includes(normalized)) return;
+      saveSuggestionCategoriesByRoom({
+        ...all,
+        [roomId]: [...existing, normalized],
+      });
+      loadAll();
+    },
+    [loadAll]
+  );
+
+  const removeSuggestionCategoryIfEmpty = useCallback(
+    (roomId: string, categoryName: string) => {
+      const normalized = categoryName.trim().toLowerCase();
+      if (!normalized || normalized === "other") return false;
+      const hasAnySuggestions = getSuggestions().some(
+        (s) => s.roomId === roomId && s.category.toLowerCase() === normalized
+      );
+      if (hasAnySuggestions) return false;
+      const all = getSuggestionCategoriesByRoom();
+      const existing = all[roomId] ?? [];
+      if (!existing.includes(normalized)) return false;
+      saveSuggestionCategoriesByRoom({
+        ...all,
+        [roomId]: existing.filter((c) => c !== normalized),
+      });
+      loadAll();
+      return true;
+    },
+    [loadAll]
   );
 
   const deleteSuggestion = useCallback(
@@ -630,6 +725,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       calendarConnections,
       polls,
       suggestions,
+      suggestionCategoriesByRoom,
       notifications,
       roomNicknames,
       nicknameRequests,
@@ -647,11 +743,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       refresh: loadAll,
       addCalendarSlot,
       addCalendarEvent,
+      createCalendarEventRequest,
+      rsvpCalendarEvent,
       connectGoogleCalendar,
       connectAppleCalendar,
       createPoll,
       votePoll,
       addSuggestion,
+      addSuggestionCategory,
+      removeSuggestionCategoryIfEmpty,
       deleteSuggestion,
       likeSuggestion,
       getWeeklyTopSuggestions,
@@ -673,6 +773,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       calendarConnections,
       polls,
       suggestions,
+      suggestionCategoriesByRoom,
       notifications,
       roomNicknames,
       nicknameRequests,
@@ -690,11 +791,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       loadAll,
       addCalendarSlot,
       addCalendarEvent,
+      createCalendarEventRequest,
+      rsvpCalendarEvent,
       connectGoogleCalendar,
       connectAppleCalendar,
       createPoll,
       votePoll,
       addSuggestion,
+      addSuggestionCategory,
+      removeSuggestionCategoryIfEmpty,
       deleteSuggestion,
       likeSuggestion,
       getWeeklyTopSuggestions,

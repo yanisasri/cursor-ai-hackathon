@@ -28,6 +28,7 @@ const KEYS = {
   nicknames: "hangout_room_nicknames",
   nicknameRequests: "hangout_nickname_requests",
   personalAccess: "hangout_personal_access",
+  suggestionCategories: "hangout_suggestion_categories",
 } as const;
 
 function read<T>(key: string, fallback: T): T {
@@ -89,11 +90,27 @@ export function saveCalendarSlots(slots: CalendarSlot[]): void {
 }
 
 export function getCalendarEvents(): CalendarEvent[] {
-  return read<CalendarEvent[]>(KEYS.calendarEvents, []);
+  return read<CalendarEvent[]>(KEYS.calendarEvents, []).map((e) => ({
+    ...e,
+    status: e.status ?? "confirmed",
+    rsvpUserIds: e.rsvpUserIds ?? [],
+    syncedToGoogleUserIds: e.syncedToGoogleUserIds ?? [],
+    syncedToAppleUserIds: e.syncedToAppleUserIds ?? [],
+  }));
 }
 
 export function saveCalendarEvents(events: CalendarEvent[]): void {
   write(KEYS.calendarEvents, events);
+}
+
+export function getSuggestionCategoriesByRoom(): Record<string, string[]> {
+  return read<Record<string, string[]>>(KEYS.suggestionCategories, {});
+}
+
+export function saveSuggestionCategoriesByRoom(
+  categoriesByRoom: Record<string, string[]>
+): void {
+  write(KEYS.suggestionCategories, categoriesByRoom);
 }
 
 export function getCalendarConnections(): CalendarConnection[] {

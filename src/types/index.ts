@@ -102,6 +102,10 @@ export interface CalendarEvent {
   startAt: string;
   endAt: string;
   source: "manual" | "google" | "apple";
+  status?: "pending" | "confirmed";
+  rsvpUserIds?: string[];
+  syncedToGoogleUserIds?: string[];
+  syncedToAppleUserIds?: string[];
 }
 
 export interface CalendarConnection {
@@ -110,12 +114,7 @@ export interface CalendarConnection {
   appleConnected: boolean;
 }
 
-export type SuggestionCategory =
-  | "restaurant"
-  | "activity"
-  | "movie"
-  | "game"
-  | "other";
+export type SuggestionCategory = string;
 
 export interface Suggestion {
   id: string;
@@ -128,6 +127,12 @@ export interface Suggestion {
   imageUrl?: string;
   createdAt: string;
   archived?: boolean;
+}
+
+export interface SuggestionCategoryOption {
+  id: SuggestionCategory;
+  label: string;
+  emoji: string;
 }
 
 export interface PollOption {
@@ -193,11 +198,7 @@ export const SUB_ROOMS: { id: SubRoomType; label: string; description: string }[
   { id: "personal", label: "Personal Rooms", description: "Each member has their own private space" },
 ];
 
-export const SUGGESTION_CATEGORIES: {
-  id: SuggestionCategory;
-  label: string;
-  emoji: string;
-}[] = [
+export const SUGGESTION_CATEGORIES: SuggestionCategoryOption[] = [
   { id: "restaurant", label: "Restaurants", emoji: "🍽️" },
   { id: "movie", label: "Movies", emoji: "🎬" },
   { id: "activity", label: "Activities", emoji: "🎯" },
