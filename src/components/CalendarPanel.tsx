@@ -17,7 +17,8 @@ export function CalendarPanel({ roomId }: { roomId: string }) {
     users,
     calendarEvents,
     calendarConnections,
-    addCalendarEvent,
+    createCalendarEventRequest,
+    rsvpCalendarEvent,
     connectGoogleCalendar,
     connectAppleCalendar,
     pushNotification,
@@ -42,6 +43,8 @@ export function CalendarPanel({ roomId }: { roomId: string }) {
   }, [calendarEvents, roomId]);
 
   const upcoming = roomEvents.filter((e) => new Date(e.startAt) >= new Date());
+  const pendingRequests = upcoming.filter((e) => e.status === "pending");
+  const confirmedEvents = upcoming.filter((e) => e.status !== "pending");
 
   const monthStart = startOfMonth(viewDate);
   const totalDays = daysInMonth(viewDate);
@@ -67,7 +70,7 @@ export function CalendarPanel({ roomId }: { roomId: string }) {
     if (!user || !title.trim() || !date) return;
     const startAt = new Date(`${date}T${startTime}`);
     const endAt = new Date(`${date}T${endTime}`);
-    addCalendarEvent({
+    createCalendarEventRequest({
       roomId,
       userId: user.id,
       title: title.trim(),
@@ -75,11 +78,15 @@ export function CalendarPanel({ roomId }: { roomId: string }) {
       startAt: startAt.toISOString(),
       endAt: endAt.toISOString(),
       source: "manual",
+      status: "pending",
+      rsvpUserIds: [],
+      syncedToGoogleUserIds: [],
+      syncedToAppleUserIds: [],
     });
     setTitle("");
     setLocation("");
     setShowForm(false);
-    pushNotification("hangout", "Event added", `${title} on ${date}`);
+    pushNotification("hangout", "Event request sent", `${title} on ${date}`);
   };
 
   return (
@@ -167,21 +174,72 @@ export function CalendarPanel({ roomId }: { roomId: string }) {
       </div>
 
       <div>
+        <h4 className="font-semibold text-cozy-900">Pending event requests</h4>
+        {pendingRequests.length === 0 ? (
+          <p className="mt-2 text-sm text-cozy-500">No pending requests right now.</p>
+        ) : (
+          <ul className="mt-2 space-y-2">
+            {pendingRequests.slice(0, 8).map((e) => {
+              const u = users.find((x) => x.id === e.userId);
+              const start = new Date(e.startAt);
+              const joined = !!user && (e.rsvpUserIds ?? []).includes(user.id);
+              return (
+                <li
+                  key={e.id}
+                  className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm"
+                >
+                  <p className="font-medium">{e.title}</p>
+                  <p className="text-cozy-600">
+                    {start.toLocaleDateString()} ·{" "}
+                    {start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    {e.location ? ` · ${e.location}` : ""}
+                  </p>
+                  <p className="text-xs text-cozy-500">
+                    Created by {u?.displayName} · RSVP: {(e.rsvpUserIds ?? []).length}
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      className={`rounded-lg px-3 py-1 text-xs font-medium ${
+                        joined ? "bg-green-600 text-white" : "bg-white"
+                      }`}
+                      onClick={() => rsvpCalendarEvent(e.id, true)}
+                    >
+                      {joined ? "Joined" : "Join hangout"}
+                    </button>
+                    {joined && (
+                      <button
+                        type="button"
+                        className="rounded-lg bg-cozy-200 px-3 py-1 text-xs"
+                        onClick={() => rsvpCalendarEvent(e.id, false)}
+                      >
+                        Cancel RSVP
+                      </button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      <div>
         <div className="flex items-center justify-between">
-          <h4 className="font-semibold text-cozy-900">Upcoming hangouts</h4>
+          <h4 className="font-semibold text-cozy-900">Confirmed hangouts</h4>
           <button
             type="button"
             className="text-sm font-medium text-plum-600"
             onClick={() => setShowForm(!showForm)}
           >
-            {showForm ? "Cancel" : "+ Add event"}
+            {showForm ? "Cancel" : "+ Request new event"}
           </button>
         </div>
-        {upcoming.length === 0 ? (
+        {confirmedEvents.length === 0 ? (
           <p className="mt-2 text-sm text-cozy-500">No upcoming events yet.</p>
         ) : (
           <ul className="mt-2 space-y-2">
-            {upcoming.slice(0, 8).map((e) => {
+            {confirmedEvents.slice(0, 8).map((e) => {
               const u = users.find((x) => x.id === e.userId);
               const start = new Date(e.startAt);
               return (
@@ -196,7 +254,9 @@ export function CalendarPanel({ roomId }: { roomId: string }) {
                     {e.location ? ` · ${e.location}` : ""}
                   </p>
                   <p className="text-xs text-cozy-500">
-                    {u?.displayName} · {e.source}
+                    {u?.displayName} · {e.source} · RSVP {(e.rsvpUserIds ?? []).length}
+                    {(e.syncedToGoogleUserIds?.length ?? 0) > 0 && " · Synced Google"}
+                    {(e.syncedToAppleUserIds?.length ?? 0) > 0 && " · Synced Apple"}
                   </p>
                 </li>
               );
@@ -207,7 +267,7 @@ export function CalendarPanel({ roomId }: { roomId: string }) {
 
       {showForm && (
         <div className="card space-y-3">
-          <p className="text-sm font-medium">Add hangout event</p>
+          <p className="text-sm font-medium">Request hangout event</p>
           <input
             className="input-field"
             placeholder="Event name"
@@ -247,7 +307,7 @@ export function CalendarPanel({ roomId }: { roomId: string }) {
             </label>
           </div>
           <button type="button" className="btn-primary w-full" onClick={addEvent}>
-            Save event
+            Send request
           </button>
         </div>
       )}

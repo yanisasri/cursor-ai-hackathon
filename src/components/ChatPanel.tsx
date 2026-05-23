@@ -11,7 +11,8 @@ export function ChatPanel({ roomId }: Props) {
   const { user } = useApp();
   const [messages, setMessages] = useState<RoomMessage[]>([]);
   const [text, setText] = useState("");
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const [stickToBottom, setStickToBottom] = useState(true);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const load = () => {
@@ -23,8 +24,13 @@ export function ChatPanel({ roomId }: Props) {
   }, [roomId]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (stickToBottom) {
+      const el = scrollRef.current;
+      if (el) {
+        el.scrollTop = el.scrollHeight;
+      }
+    }
+  }, [messages, stickToBottom]);
 
   const send = () => {
     if (!user || !text.trim()) return;
@@ -45,7 +51,17 @@ export function ChatPanel({ roomId }: Props) {
       <p className="border-b border-cozy-100 px-3 py-2 text-xs font-semibold text-cozy-600">
         Message chat
       </p>
-      <div className="flex-1 overflow-y-auto px-3 py-2 text-sm">
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto px-3 py-2 text-sm"
+        onScroll={() => {
+          const el = scrollRef.current;
+          if (!el) return;
+          const nearBottom =
+            el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+          setStickToBottom(nearBottom);
+        }}
+      >
         {messages.length === 0 && (
           <p className="text-cozy-400">Say hi to the room…</p>
         )}
@@ -57,7 +73,6 @@ export function ChatPanel({ roomId }: Props) {
             {m.text}
           </p>
         ))}
-        <div ref={bottomRef} />
       </div>
       <div className="flex gap-2 border-t border-cozy-100 p-2">
         <input
