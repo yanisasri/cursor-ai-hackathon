@@ -1,4 +1,5 @@
 import type {
+  AvatarConfig,
   CalendarConnection,
   CalendarEvent,
   CalendarSlot,
@@ -198,125 +199,200 @@ export function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-/** Stable demo friend IDs so they persist across sessions */
+/** Stable demo friend IDs so they persist across sessions (7 friends + you = 8 max) */
 export const DEMO_FRIEND_IDS = {
   alex: "demo-friend-alex",
   sam: "demo-friend-sam",
   jordan: "demo-friend-jordan",
+  casey: "demo-friend-casey",
+  morgan: "demo-friend-morgan",
+  riley: "demo-friend-riley",
+  taylor: "demo-friend-taylor",
 } as const;
 
-export function linkExistingDemoFriends(currentUserId: string): void {
-  const users = read<User[]>(KEYS.users, []);
-  const demos = users.filter((u) => u.email.endsWith("@demo.com"));
-  if (demos.length === 0) return;
+const ALL_DEMO_IDS = Object.values(DEMO_FRIEND_IDS);
+
+type DemoProfile = {
+  id: string;
+  email: string;
+  displayName: string;
+  avatar: AvatarConfig;
+};
+
+const DEMO_PROFILES: DemoProfile[] = [
+  {
+    id: DEMO_FRIEND_IDS.alex,
+    email: "alex@demo.com",
+    displayName: "Alex",
+    avatar: {
+      hairstyle: "short",
+      hairColor: "#2c1810",
+      shirtStyle: "hoodie",
+      shirtColor: "#e07a5f",
+      bottomStyle: "pants",
+      bottomColor: "#1d3557",
+      shoes: "sneakers",
+      accessory: "headphones",
+      skinTone: "#e8c4a8",
+    },
+  },
+  {
+    id: DEMO_FRIEND_IDS.sam,
+    email: "sam@demo.com",
+    displayName: "Sam",
+    avatar: {
+      hairstyle: "curly",
+      hairColor: "#8b5a2b",
+      shirtStyle: "sweater",
+      shirtColor: "#81b29a",
+      bottomStyle: "skirt",
+      bottomColor: "#f4a261",
+      shoes: "boots",
+      accessory: "glasses",
+      skinTone: "#d4a574",
+    },
+  },
+  {
+    id: DEMO_FRIEND_IDS.jordan,
+    email: "jordan@demo.com",
+    displayName: "Jordan",
+    avatar: {
+      hairstyle: "bun",
+      hairColor: "#1a1a2e",
+      shirtStyle: "jacket",
+      shirtColor: "#9b5de5",
+      bottomStyle: "pants",
+      bottomColor: "#264653",
+      shoes: "sneakers",
+      accessory: "hat",
+      skinTone: "#c68642",
+    },
+  },
+  {
+    id: DEMO_FRIEND_IDS.casey,
+    email: "casey@demo.com",
+    displayName: "Casey",
+    avatar: {
+      hairstyle: "medium",
+      hairColor: "#5c4033",
+      shirtStyle: "tee",
+      shirtColor: "#457b9d",
+      bottomStyle: "shorts",
+      bottomColor: "#f1faee",
+      shoes: "sandals",
+      accessory: "none",
+      skinTone: "#f5d0b5",
+    },
+  },
+  {
+    id: DEMO_FRIEND_IDS.morgan,
+    email: "morgan@demo.com",
+    displayName: "Morgan",
+    avatar: {
+      hairstyle: "ponytail",
+      hairColor: "#6a040f",
+      shirtStyle: "polo",
+      shirtColor: "#ffb703",
+      bottomStyle: "pants",
+      bottomColor: "#023047",
+      shoes: "loafers",
+      accessory: "glasses",
+      skinTone: "#d4a574",
+    },
+  },
+  {
+    id: DEMO_FRIEND_IDS.riley,
+    email: "riley@demo.com",
+    displayName: "Riley",
+    avatar: {
+      hairstyle: "bangs",
+      hairColor: "#3d005b",
+      shirtStyle: "tank",
+      shirtColor: "#06d6a0",
+      bottomStyle: "skirt",
+      bottomColor: "#118ab2",
+      shoes: "heels",
+      accessory: "none",
+      skinTone: "#e8c4a8",
+    },
+  },
+  {
+    id: DEMO_FRIEND_IDS.taylor,
+    email: "taylor@demo.com",
+    displayName: "Taylor",
+    avatar: {
+      hairstyle: "long",
+      hairColor: "#4a3728",
+      shirtStyle: "blazer",
+      shirtColor: "#7209b7",
+      bottomStyle: "dress",
+      bottomColor: "#560bad",
+      shoes: "boots",
+      accessory: "hat",
+      skinTone: "#c68642",
+    },
+  },
+];
+
+function buildDemoUser(profile: DemoProfile, currentUserId: string): User {
+  return {
+    id: profile.id,
+    email: profile.email,
+    password: "demo123",
+    displayName: profile.displayName,
+    avatar: profile.avatar,
+    friendIds: [
+      currentUserId,
+      ...ALL_DEMO_IDS.filter((id) => id !== profile.id),
+    ],
+    online: true,
+    avatarCustomized: true,
+  };
+}
+
+/** Create any missing demo users and link them to the current user */
+export function ensureDemoFriends(currentUserId: string): void {
+  let users = getUsers();
   const current = users.find((u) => u.id === currentUserId);
   if (!current) return;
-  const demoIds = demos.map((d) => d.id);
-  const needsUpdate = demoIds.some((id) => !current.friendIds.includes(id));
-  if (!needsUpdate) return;
-  const updatedCurrent: User = {
-    ...current,
-    friendIds: [...new Set([...current.friendIds, ...demoIds])],
-  };
-  saveUsers(
-    users.map((u) => (u.id === currentUserId ? updatedCurrent : u))
-  );
+
+  for (const profile of DEMO_PROFILES) {
+    if (!users.some((u) => u.id === profile.id)) {
+      users = [...users, buildDemoUser(profile, currentUserId)];
+    }
+  }
+
+  users = users.map((u) => {
+    if (u.id === currentUserId) {
+      return {
+        ...u,
+        friendIds: [...new Set([...u.friendIds, ...ALL_DEMO_IDS])],
+      };
+    }
+    if (ALL_DEMO_IDS.includes(u.id as (typeof ALL_DEMO_IDS)[number])) {
+      return {
+        ...u,
+        friendIds: [
+          ...new Set([
+            ...u.friendIds,
+            currentUserId,
+            ...ALL_DEMO_IDS.filter((id) => id !== u.id),
+          ]),
+        ],
+      };
+    }
+    return u;
+  });
+
+  saveUsers(users);
+}
+
+export function linkExistingDemoFriends(currentUserId: string): void {
+  ensureDemoFriends(currentUserId);
 }
 
 export function seedDemoFriends(currentUserId: string): void {
-  const users = getUsers();
-  if (users.some((u) => u.id === DEMO_FRIEND_IDS.alex)) {
-    linkExistingDemoFriends(currentUserId);
-    return;
-  }
-  if (users.some((u) => u.email === "alex@demo.com")) {
-    linkExistingDemoFriends(currentUserId);
-    return;
-  }
-
-  const demoUsers: User[] = [
-    {
-      id: DEMO_FRIEND_IDS.alex,
-      email: "alex@demo.com",
-      password: "demo123",
-      displayName: "Alex",
-      avatar: {
-        hairstyle: "short",
-        hairColor: "#2c1810",
-        shirtStyle: "hoodie",
-        shirtColor: "#e07a5f",
-        bottomStyle: "pants",
-        bottomColor: "#1d3557",
-        shoes: "sneakers",
-        accessory: "headphones",
-        skinTone: "#e8c4a8",
-      },
-      friendIds: [currentUserId, DEMO_FRIEND_IDS.sam, DEMO_FRIEND_IDS.jordan],
-      online: true,
-      avatarCustomized: true,
-    },
-    {
-      id: DEMO_FRIEND_IDS.sam,
-      email: "sam@demo.com",
-      password: "demo123",
-      displayName: "Sam",
-      avatar: {
-        hairstyle: "curly",
-        hairColor: "#8b5a2b",
-        shirtStyle: "sweater",
-        shirtColor: "#81b29a",
-        bottomStyle: "skirt",
-        bottomColor: "#f4a261",
-        shoes: "boots",
-        accessory: "glasses",
-        skinTone: "#d4a574",
-      },
-      friendIds: [currentUserId, DEMO_FRIEND_IDS.alex, DEMO_FRIEND_IDS.jordan],
-      online: true,
-      avatarCustomized: true,
-    },
-    {
-      id: DEMO_FRIEND_IDS.jordan,
-      email: "jordan@demo.com",
-      password: "demo123",
-      displayName: "Jordan",
-      avatar: {
-        hairstyle: "bun",
-        hairColor: "#1a1a2e",
-        shirtStyle: "jacket",
-        shirtColor: "#9b5de5",
-        bottomStyle: "pants",
-        bottomColor: "#264653",
-        shoes: "sneakers",
-        accessory: "hat",
-        skinTone: "#c68642",
-      },
-      friendIds: [currentUserId, DEMO_FRIEND_IDS.alex, DEMO_FRIEND_IDS.sam],
-      online: true,
-      avatarCustomized: true,
-    },
-  ];
-
-  const current = users.find((u) => u.id === currentUserId);
-  if (!current) return;
-
-  const updatedCurrent: User = {
-    ...current,
-    friendIds: [
-      ...new Set([
-        ...current.friendIds,
-        DEMO_FRIEND_IDS.alex,
-        DEMO_FRIEND_IDS.sam,
-        DEMO_FRIEND_IDS.jordan,
-      ]),
-    ],
-  };
-
-  saveUsers([
-    ...users.filter((u) => u.id !== currentUserId),
-    updatedCurrent,
-    ...demoUsers,
-  ]);
+  ensureDemoFriends(currentUserId);
 }
 
 export function ensurePersonalRoomsForRoom(room: VirtualRoom): PersonalRoomAccess[] {
