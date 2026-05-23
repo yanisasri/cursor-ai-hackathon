@@ -1,127 +1,256 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
 
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function startOfMonth(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+function daysInMonth(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+}
 
 export function CalendarPanel({ roomId }: { roomId: string }) {
-  const { user, users, calendarSlots, addCalendarSlot, pushNotification } = useApp();
-  const [day, setDay] = useState("Fri");
-  const [startHour, setStartHour] = useState(18);
-  const [endHour, setEndHour] = useState(21);
-  const [label, setLabel] = useState("Free for hangout");
+  const {
+    user,
+    users,
+    calendarEvents,
+    calendarConnections,
+    addCalendarEvent,
+    connectGoogleCalendar,
+    connectAppleCalendar,
+    pushNotification,
+  } = useApp();
 
-  const memberSlots = calendarSlots.filter((s) =>
-    users.some((u) => u.id === s.userId)
-  );
+  const [viewDate, setViewDate] = useState(new Date());
+  const [showForm, setShowForm] = useState(false);
+  const [title, setTitle] = useState("");
+  const [location, setLocation] = useState("");
+  const [date, setDate] = useState("");
+  const [startTime, setStartTime] = useState("18:00");
+  const [endTime, setEndTime] = useState("20:00");
 
-  const addSlot = () => {
-    if (!user) return;
-    addCalendarSlot({
-      userId: user.id,
-      label,
-      day,
-      startHour,
-      endHour,
-      free: true,
+  const conn = user
+    ? calendarConnections.find((c) => c.userId === user.id)
+    : null;
+
+  const roomEvents = useMemo(() => {
+    return calendarEvents
+      .filter((e) => e.roomId === roomId || e.roomId === "")
+      .sort((a, b) => a.startAt.localeCompare(b.startAt));
+  }, [calendarEvents, roomId]);
+
+  const upcoming = roomEvents.filter((e) => new Date(e.startAt) >= new Date());
+
+  const monthStart = startOfMonth(viewDate);
+  const totalDays = daysInMonth(viewDate);
+  const startPad = monthStart.getDay();
+  const cells: (number | null)[] = [
+    ...Array(startPad).fill(null),
+    ...Array.from({ length: totalDays }, (_, i) => i + 1),
+  ];
+
+  const eventsOnDay = (day: number) => {
+    const d = new Date(viewDate.getFullYear(), viewDate.getMonth(), day);
+    return roomEvents.filter((e) => {
+      const start = new Date(e.startAt);
+      return (
+        start.getFullYear() === d.getFullYear() &&
+        start.getMonth() === d.getMonth() &&
+        start.getDate() === d.getDate()
+      );
     });
-    pushNotification(
-      "calendar",
-      "Availability updated",
-      `${user.displayName} is free ${day} ${startHour}:00–${endHour}:00`
-    );
+  };
+
+  const addEvent = () => {
+    if (!user || !title.trim() || !date) return;
+    const startAt = new Date(`${date}T${startTime}`);
+    const endAt = new Date(`${date}T${endTime}`);
+    addCalendarEvent({
+      roomId,
+      userId: user.id,
+      title: title.trim(),
+      location: location.trim(),
+      startAt: startAt.toISOString(),
+      endAt: endAt.toISOString(),
+      source: "manual",
+    });
+    setTitle("");
+    setLocation("");
+    setShowForm(false);
+    pushNotification("hangout", "Event added", `${title} on ${date}`);
   };
 
   return (
-    <div className="max-h-[70vh] overflow-y-auto p-2">
-      <h3 className="font-display text-lg font-semibold">Shared availability</h3>
+    <div className="max-h-[75vh] space-y-4 overflow-y-auto p-2">
+      <h3 className="font-display text-lg font-semibold">Shared calendar</h3>
       <p className="text-sm text-cozy-600">
-        See when friends are free — no more endless &quot;when works for you?&quot; texts.
+        Connect calendars or add hangouts manually — see what&apos;s coming up at a glance.
       </p>
 
-      <div className="card mt-4 space-y-3">
-        <p className="text-sm font-medium">Add your availability</p>
-        <input
-          className="input-field"
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-        />
-        <div className="flex flex-wrap gap-2">
-          {DAYS.map((d) => (
-            <button
-              key={d}
-              type="button"
-              onClick={() => setDay(d)}
-              className={`rounded-lg px-2 py-1 text-sm ${
-                day === d ? "bg-plum-600 text-white" : "bg-cozy-200"
-              }`}
-            >
-              {d}
-            </button>
-          ))}
-        </div>
-        <div className="flex gap-2 text-sm">
-          <label>
-            From
-            <input
-              type="number"
-              min={0}
-              max={23}
-              className="input-field ml-1 w-16"
-              value={startHour}
-              onChange={(e) => setStartHour(Number(e.target.value))}
-            />
-          </label>
-          <label>
-            To
-            <input
-              type="number"
-              min={0}
-              max={23}
-              className="input-field ml-1 w-16"
-              value={endHour}
-              onChange={(e) => setEndHour(Number(e.target.value))}
-            />
-          </label>
-        </div>
-        <button type="button" className="btn-primary" onClick={addSlot}>
-          Share availability
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          className={`rounded-lg px-3 py-2 text-sm font-medium ${
+            conn?.googleConnected ? "bg-green-100 text-green-800" : "btn-secondary"
+          }`}
+          onClick={connectGoogleCalendar}
+        >
+          {conn?.googleConnected ? "✓ Google Calendar" : "Connect Google Calendar"}
+        </button>
+        <button
+          type="button"
+          className={`rounded-lg px-3 py-2 text-sm font-medium ${
+            conn?.appleConnected ? "bg-gray-800 text-white" : "btn-secondary"
+          }`}
+          onClick={connectAppleCalendar}
+        >
+          {conn?.appleConnected ? "✓ Apple Calendar" : "Connect Apple Calendar"}
         </button>
       </div>
 
-      <div className="mt-4 space-y-2">
-        {memberSlots.length === 0 ? (
-          <p className="text-sm text-cozy-500">No availability posted yet.</p>
+      <div className="card">
+        <div className="mb-3 flex items-center justify-between">
+          <button
+            type="button"
+            className="rounded-lg px-2 py-1 text-sm hover:bg-cozy-100"
+            onClick={() =>
+              setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))
+            }
+          >
+            ←
+          </button>
+          <h4 className="font-semibold">
+            {viewDate.toLocaleString("default", { month: "long", year: "numeric" })}
+          </h4>
+          <button
+            type="button"
+            className="rounded-lg px-2 py-1 text-sm hover:bg-cozy-100"
+            onClick={() =>
+              setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))
+            }
+          >
+            →
+          </button>
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-cozy-500">
+          {WEEKDAYS.map((d) => (
+            <div key={d}>{d}</div>
+          ))}
+        </div>
+        <div className="mt-1 grid grid-cols-7 gap-1">
+          {cells.map((day, i) => (
+            <div
+              key={i}
+              className={`min-h-12 rounded-lg p-1 text-xs ${
+                day ? "border border-cozy-100 bg-cozy-50" : ""
+              }`}
+            >
+              {day && (
+                <>
+                  <span className="font-medium">{day}</span>
+                  {eventsOnDay(day).map((e) => (
+                    <div
+                      key={e.id}
+                      className="mt-0.5 truncate rounded bg-plum-100 px-0.5 text-[9px] text-plum-800"
+                      title={e.title}
+                    >
+                      {e.title}
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between">
+          <h4 className="font-semibold text-cozy-900">Upcoming hangouts</h4>
+          <button
+            type="button"
+            className="text-sm font-medium text-plum-600"
+            onClick={() => setShowForm(!showForm)}
+          >
+            {showForm ? "Cancel" : "+ Add event"}
+          </button>
+        </div>
+        {upcoming.length === 0 ? (
+          <p className="mt-2 text-sm text-cozy-500">No upcoming events yet.</p>
         ) : (
-          memberSlots.map((slot) => {
-            const u = users.find((x) => x.id === slot.userId);
-            return (
-              <div
-                key={slot.id}
-                className="flex items-center justify-between rounded-xl border border-cozy-200 px-3 py-2 text-sm"
-              >
-                <span className="font-medium">{u?.displayName ?? "Friend"}</span>
-                <span className="text-cozy-600">
-                  {slot.day} {slot.startHour}:00–{slot.endHour}:00 — {slot.label}
-                </span>
-              </div>
-            );
-          })
+          <ul className="mt-2 space-y-2">
+            {upcoming.slice(0, 8).map((e) => {
+              const u = users.find((x) => x.id === e.userId);
+              const start = new Date(e.startAt);
+              return (
+                <li
+                  key={e.id}
+                  className="rounded-xl border border-cozy-200 px-3 py-2 text-sm"
+                >
+                  <p className="font-medium">{e.title}</p>
+                  <p className="text-cozy-600">
+                    {start.toLocaleDateString()} ·{" "}
+                    {start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    {e.location ? ` · ${e.location}` : ""}
+                  </p>
+                  <p className="text-xs text-cozy-500">
+                    {u?.displayName} · {e.source}
+                  </p>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </div>
 
-      <button
-        type="button"
-        className="btn-secondary mt-4 w-full text-sm"
-        onClick={() =>
-          pushNotification(
-            "hangout",
-            "Hangout reminder",
-            `Your hangout in ${roomId.slice(0, 6)}… starts in 1 hour!`
-          )
-        }
-      >
-        Demo: Send hangout reminder
-      </button>
+      {showForm && (
+        <div className="card space-y-3">
+          <p className="text-sm font-medium">Add hangout event</p>
+          <input
+            className="input-field"
+            placeholder="Event name"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <input
+            className="input-field"
+            placeholder="Location (optional)"
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+          />
+          <input
+            type="date"
+            className="input-field"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-sm">
+              Start
+              <input
+                type="time"
+                className="input-field mt-1"
+                value={startTime}
+                onChange={(e) => setStartTime(e.target.value)}
+              />
+            </label>
+            <label className="text-sm">
+              End
+              <input
+                type="time"
+                className="input-field mt-1"
+                value={endTime}
+                onChange={(e) => setEndTime(e.target.value)}
+              />
+            </label>
+          </div>
+          <button type="button" className="btn-primary w-full" onClick={addEvent}>
+            Save event
+          </button>
+        </div>
+      )}
     </div>
   );
 }

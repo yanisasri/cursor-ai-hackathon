@@ -1,22 +1,33 @@
 import type {
+  CalendarConnection,
+  CalendarEvent,
   CalendarSlot,
+  NicknameRequest,
   Notification,
+  PersonalRoomAccess,
   Poll,
   RoomMessage,
+  RoomNickname,
   Suggestion,
   User,
   VirtualRoom,
 } from "../types";
+import { ARCHIVE_DAYS, DEFAULT_AVATAR } from "../types";
 
 const KEYS = {
   users: "hangout_users",
   session: "hangout_session",
   rooms: "hangout_rooms",
   calendar: "hangout_calendar",
+  calendarEvents: "hangout_calendar_events",
+  calendarConnections: "hangout_calendar_connections",
   polls: "hangout_polls",
   suggestions: "hangout_suggestions",
   notifications: "hangout_notifications",
   messages: "hangout_messages",
+  nicknames: "hangout_room_nicknames",
+  nicknameRequests: "hangout_nickname_requests",
+  personalAccess: "hangout_personal_access",
 } as const;
 
 function read<T>(key: string, fallback: T): T {
@@ -33,7 +44,19 @@ function write<T>(key: string, value: T): void {
 }
 
 export function getUsers(): User[] {
-  return read<User[]>(KEYS.users, []);
+  return migrateUsers(read<User[]>(KEYS.users, []));
+}
+
+function migrateUsers(users: User[]): User[] {
+  return users.map((u) => ({
+    ...u,
+    avatar: {
+      ...DEFAULT_AVATAR,
+      ...u.avatar,
+      accessory: u.avatar?.accessory ?? "none",
+      skinTone: u.avatar?.skinTone ?? "#f5d0b5",
+    },
+  }));
 }
 
 export function saveUsers(users: User[]): void {
@@ -65,6 +88,22 @@ export function saveCalendarSlots(slots: CalendarSlot[]): void {
   write(KEYS.calendar, slots);
 }
 
+export function getCalendarEvents(): CalendarEvent[] {
+  return read<CalendarEvent[]>(KEYS.calendarEvents, []);
+}
+
+export function saveCalendarEvents(events: CalendarEvent[]): void {
+  write(KEYS.calendarEvents, events);
+}
+
+export function getCalendarConnections(): CalendarConnection[] {
+  return read<CalendarConnection[]>(KEYS.calendarConnections, []);
+}
+
+export function saveCalendarConnections(connections: CalendarConnection[]): void {
+  write(KEYS.calendarConnections, connections);
+}
+
 export function getPolls(): Poll[] {
   return read<Poll[]>(KEYS.polls, []);
 }
@@ -74,11 +113,28 @@ export function savePolls(polls: Poll[]): void {
 }
 
 export function getSuggestions(): Suggestion[] {
-  return read<Suggestion[]>(KEYS.suggestions, []);
+  return migrateSuggestions(read<Suggestion[]>(KEYS.suggestions, []));
+}
+
+function migrateSuggestions(items: Suggestion[]): Suggestion[] {
+  const now = new Date().toISOString();
+  const archiveMs = ARCHIVE_DAYS * 24 * 60 * 60 * 1000;
+  return items.map((s) => {
+    const createdAt = s.createdAt ?? now;
+    const age = Date.now() - new Date(createdAt).getTime();
+    const shouldArchive =
+      !s.archived && s.likes.length === 0 && age >= archiveMs;
+    return {
+      ...s,
+      createdAt,
+      archived: s.archived || shouldArchive,
+    };
+  });
 }
 
 export function saveSuggestions(suggestions: Suggestion[]): void {
-  write(KEYS.suggestions, suggestions);
+  const migrated = migrateSuggestions(suggestions);
+  write(KEYS.suggestions, migrated);
 }
 
 export function getNotifications(): Notification[] {
@@ -97,17 +153,73 @@ export function saveMessages(messages: RoomMessage[]): void {
   write(KEYS.messages, messages);
 }
 
+export function getRoomNicknames(): RoomNickname[] {
+  return read<RoomNickname[]>(KEYS.nicknames, []);
+}
+
+export function saveRoomNicknames(nicknames: RoomNickname[]): void {
+  write(KEYS.nicknames, nicknames);
+}
+
+export function getNicknameRequests(): NicknameRequest[] {
+  return read<NicknameRequest[]>(KEYS.nicknameRequests, []);
+}
+
+export function saveNicknameRequests(requests: NicknameRequest[]): void {
+  write(KEYS.nicknameRequests, requests);
+}
+
+export function getPersonalRoomAccess(): PersonalRoomAccess[] {
+  return read<PersonalRoomAccess[]>(KEYS.personalAccess, []);
+}
+
+export function savePersonalRoomAccess(access: PersonalRoomAccess[]): void {
+  write(KEYS.personalAccess, access);
+}
+
 export function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+/** Stable demo friend IDs so they persist across sessions */
+export const DEMO_FRIEND_IDS = {
+  alex: "demo-friend-alex",
+  sam: "demo-friend-sam",
+  jordan: "demo-friend-jordan",
+} as const;
+
+export function linkExistingDemoFriends(currentUserId: string): void {
+  const users = read<User[]>(KEYS.users, []);
+  const demos = users.filter((u) => u.email.endsWith("@demo.com"));
+  if (demos.length === 0) return;
+  const current = users.find((u) => u.id === currentUserId);
+  if (!current) return;
+  const demoIds = demos.map((d) => d.id);
+  const needsUpdate = demoIds.some((id) => !current.friendIds.includes(id));
+  if (!needsUpdate) return;
+  const updatedCurrent: User = {
+    ...current,
+    friendIds: [...new Set([...current.friendIds, ...demoIds])],
+  };
+  saveUsers(
+    users.map((u) => (u.id === currentUserId ? updatedCurrent : u))
+  );
+}
+
 export function seedDemoFriends(currentUserId: string): void {
   const users = getUsers();
-  if (users.some((u) => u.email === "alex@demo.com")) return;
+  if (users.some((u) => u.id === DEMO_FRIEND_IDS.alex)) {
+    linkExistingDemoFriends(currentUserId);
+    return;
+  }
+  if (users.some((u) => u.email === "alex@demo.com")) {
+    linkExistingDemoFriends(currentUserId);
+    return;
+  }
 
-  const demos: Omit<User, "friendIds">[] = [
+  const demoUsers: User[] = [
     {
-      id: generateId(),
+      id: DEMO_FRIEND_IDS.alex,
       email: "alex@demo.com",
       password: "demo123",
       displayName: "Alex",
@@ -119,11 +231,15 @@ export function seedDemoFriends(currentUserId: string): void {
         bottomStyle: "pants",
         bottomColor: "#1d3557",
         shoes: "sneakers",
+        accessory: "headphones",
+        skinTone: "#e8c4a8",
       },
+      friendIds: [currentUserId, DEMO_FRIEND_IDS.sam, DEMO_FRIEND_IDS.jordan],
       online: true,
+      avatarCustomized: true,
     },
     {
-      id: generateId(),
+      id: DEMO_FRIEND_IDS.sam,
       email: "sam@demo.com",
       password: "demo123",
       displayName: "Sam",
@@ -135,46 +251,48 @@ export function seedDemoFriends(currentUserId: string): void {
         bottomStyle: "skirt",
         bottomColor: "#f4a261",
         shoes: "boots",
+        accessory: "glasses",
+        skinTone: "#d4a574",
       },
-      online: false,
+      friendIds: [currentUserId, DEMO_FRIEND_IDS.alex, DEMO_FRIEND_IDS.jordan],
+      online: true,
+      avatarCustomized: true,
     },
     {
-      id: generateId(),
+      id: DEMO_FRIEND_IDS.jordan,
       email: "jordan@demo.com",
       password: "demo123",
       displayName: "Jordan",
       avatar: {
         hairstyle: "bun",
         hairColor: "#1a1a2e",
-        shirtStyle: "tee",
+        shirtStyle: "jacket",
         shirtColor: "#9b5de5",
         bottomStyle: "pants",
         bottomColor: "#264653",
-        shoes: "sandals",
+        shoes: "sneakers",
+        accessory: "hat",
+        skinTone: "#c68642",
       },
+      friendIds: [currentUserId, DEMO_FRIEND_IDS.alex, DEMO_FRIEND_IDS.sam],
       online: true,
+      avatarCustomized: true,
     },
   ];
-
-  const demoUsers: User[] = demos.map((d) => ({
-    ...d,
-    friendIds: [] as string[],
-  }));
-
-  const demoIds = demoUsers.map((d) => d.id);
-  demoUsers.forEach((d) => {
-    d.friendIds = [
-      currentUserId,
-      ...demoIds.filter((id) => id !== d.id),
-    ];
-  });
 
   const current = users.find((u) => u.id === currentUserId);
   if (!current) return;
 
   const updatedCurrent: User = {
     ...current,
-    friendIds: [...current.friendIds, ...demoIds],
+    friendIds: [
+      ...new Set([
+        ...current.friendIds,
+        DEMO_FRIEND_IDS.alex,
+        DEMO_FRIEND_IDS.sam,
+        DEMO_FRIEND_IDS.jordan,
+      ]),
+    ],
   };
 
   saveUsers([
@@ -182,4 +300,24 @@ export function seedDemoFriends(currentUserId: string): void {
     updatedCurrent,
     ...demoUsers,
   ]);
+}
+
+export function ensurePersonalRoomsForRoom(room: VirtualRoom): PersonalRoomAccess[] {
+  const all = getPersonalRoomAccess();
+  const existing = all.filter((a) => a.roomId === room.id);
+  const missing = room.memberIds.filter(
+    (id) => !existing.some((e) => e.ownerId === id)
+  );
+  if (missing.length === 0) return all;
+
+  const added: PersonalRoomAccess[] = missing.map((ownerId) => ({
+    roomId: room.id,
+    ownerId,
+    grantedIds: [ownerId],
+    pendingRequests: [],
+  }));
+
+  const next = [...all, ...added];
+  savePersonalRoomAccess(next);
+  return next;
 }

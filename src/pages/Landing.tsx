@@ -24,7 +24,10 @@ export function Landing() {
             <Link to="/sign-in" className="btn-primary bg-white text-plum-700 hover:bg-cozy-50">
               Sign in
             </Link>
-            <Link to="/sign-up" className="btn-secondary border-white text-white hover:bg-white/10">
+            <Link
+              to="/sign-up"
+              className="rounded-xl border-2 border-white bg-white/15 px-5 py-2.5 font-medium text-white shadow-md backdrop-blur transition hover:bg-white hover:text-plum-700"
+            >
               Create account
             </Link>
           </div>

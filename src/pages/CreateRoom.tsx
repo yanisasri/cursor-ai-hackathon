@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, Navigate } from "react-router-dom";
 import { Navbar } from "../components/Navbar";
 import { useApp } from "../context/AppContext";
@@ -12,11 +12,21 @@ export function CreateRoom() {
   const [name, setName] = useState("");
   const [maxMembers, setMaxMembers] = useState(8);
   const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
-  const [inviteEmail, setInviteEmail] = useState("");
+  const [myNickname, setMyNickname] = useState("");
+  const [initialized, setInitialized] = useState(false);
+
+  const friends = user
+    ? users.filter((u) => user.friendIds.includes(u.id))
+    : [];
+
+  useEffect(() => {
+    if (!initialized && friends.length > 0) {
+      setSelectedFriends(friends.map((f) => f.id));
+      setInitialized(true);
+    }
+  }, [friends, initialized]);
 
   if (!user) return <Navigate to="/sign-in" replace />;
-
-  const friends = users.filter((u) => user.friendIds.includes(u.id));
 
   const toggleFriend = (id: string) => {
     setSelectedFriends((prev) =>
@@ -32,6 +42,7 @@ export function CreateRoom() {
       area,
       maxMembers,
       friendIds: selectedFriends,
+      myNickname: myNickname.trim() || undefined,
     });
     navigate(`/room/${room.id}`);
   };
@@ -73,6 +84,16 @@ export function CreateRoom() {
           </label>
 
           <label className="block text-sm font-medium">
+            Your nickname in this room (optional)
+            <input
+              className="input-field mt-1"
+              placeholder="e.g. Captain Chaos"
+              value={myNickname}
+              onChange={(e) => setMyNickname(e.target.value)}
+            />
+          </label>
+
+          <label className="block text-sm font-medium">
             3. Max people (up to {MAX_ROOM_MEMBERS})
             <input
               type="number"
@@ -89,29 +110,29 @@ export function CreateRoom() {
           </label>
 
           <div>
-            <p className="mb-2 text-sm font-medium">4. Add friends</p>
+            <p className="mb-2 text-sm font-medium">
+              4. Add friends (pre-selected — includes demo friends)
+            </p>
             <div className="flex flex-wrap gap-2">
-              {friends.map((f) => (
-                <button
-                  key={f.id}
-                  type="button"
-                  onClick={() => toggleFriend(f.id)}
-                  className={`rounded-lg px-3 py-1.5 text-sm ${
-                    selectedFriends.includes(f.id)
-                      ? "bg-plum-600 text-white"
-                      : "bg-cozy-200"
-                  }`}
-                >
-                  {f.displayName}
-                </button>
-              ))}
+              {friends.length === 0 ? (
+                <p className="text-sm text-cozy-500">No friends yet — sign up adds demo friends.</p>
+              ) : (
+                friends.map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => toggleFriend(f.id)}
+                    className={`rounded-lg px-3 py-1.5 text-sm ${
+                      selectedFriends.includes(f.id)
+                        ? "bg-plum-600 text-white"
+                        : "bg-cozy-200"
+                    }`}
+                  >
+                    {f.displayName}
+                  </button>
+                ))
+              )}
             </div>
-            <input
-              className="input-field mt-2"
-              placeholder="Or invite by email (add friend first from home)"
-              value={inviteEmail}
-              onChange={(e) => setInviteEmail(e.target.value)}
-            />
           </div>
 
           <button type="submit" className="btn-primary w-full">

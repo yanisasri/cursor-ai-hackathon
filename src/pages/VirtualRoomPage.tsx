@@ -1,23 +1,39 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { CalendarPanel } from "../components/CalendarPanel";
 import { ChatPanel } from "../components/ChatPanel";
 import { DecisionRoomPanel } from "../components/decision/DecisionRoomPanel";
 import { Navbar } from "../components/Navbar";
+import { PersonalRoomsPanel } from "../components/PersonalRoomsPanel";
+import { RoomNicknamesPanel } from "../components/RoomNicknamesPanel";
 import { SuggestionsPanel } from "../components/SuggestionsPanel";
 import { VirtualWorld } from "../components/VirtualWorld";
 import { useApp } from "../context/AppContext";
-import { SUB_ROOMS, type SubRoomType } from "../types";
+import { MAX_ROOM_MEMBERS, SUB_ROOMS, type SubRoomType } from "../types";
 
 export function VirtualRoomPage() {
   const { roomId } = useParams<{ roomId: string }>();
-  const { user, rooms } = useApp();
+  const { user, rooms, ensureRoomSetup } = useApp();
   const [activeSubRoom, setActiveSubRoom] = useState<SubRoomType>("living");
   const [panelOpen, setPanelOpen] = useState(false);
 
-  if (!user) return <Navigate to="/sign-in" replace />;
+  useEffect(() => {
+    if (roomId) ensureRoomSetup(roomId);
+  }, [roomId, ensureRoomSetup]);
 
   const room = rooms.find((r) => r.id === roomId);
+
+  const displayMemberIds = useMemo(() => {
+    if (!room || !user) return [];
+    const ids = new Set(room.memberIds);
+    user.friendIds.forEach((fid) => {
+      if (ids.size < MAX_ROOM_MEMBERS) ids.add(fid);
+    });
+    return Array.from(ids);
+  }, [room, user]);
+
+  if (!user) return <Navigate to="/sign-in" replace />;
+
   if (!room || !room.memberIds.includes(user.id)) {
     return (
       <>
@@ -43,15 +59,7 @@ export function VirtualRoomPage() {
       case "suggestions":
         return <SuggestionsPanel roomId={room.id} />;
       case "personal":
-        return (
-          <div className="p-4">
-            <h3 className="font-semibold">Personal room</h3>
-            <p className="mt-2 text-sm text-cozy-600">
-              You&apos;re in a private space. Others must request to enter. Use voice
-              chat for 1:1 conversations (demo toggle on the map).
-            </p>
-          </div>
-        );
+        return <PersonalRoomsPanel roomId={room.id} memberIds={displayMemberIds} />;
       default:
         return (
           <div className="p-4">
@@ -103,6 +111,7 @@ export function VirtualRoomPage() {
           <div className="lg:col-span-2">
             <VirtualWorld
               roomId={room.id}
+              memberIds={displayMemberIds}
               area={room.area}
               activeSubRoom={activeSubRoom}
               onEnterSubRoom={(zone) => {
@@ -110,6 +119,7 @@ export function VirtualRoomPage() {
                 setPanelOpen(true);
               }}
             />
+            <RoomNicknamesPanel roomId={room.id} memberIds={displayMemberIds} />
             <div className="mt-4">
               <ChatPanel roomId={room.id} />
             </div>

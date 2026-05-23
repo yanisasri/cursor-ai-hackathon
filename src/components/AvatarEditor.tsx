@@ -2,10 +2,20 @@ import { useState } from "react";
 import type { AvatarConfig } from "../types";
 import { AvatarPreview } from "./AvatarPreview";
 
-const HAIRSTYLES = ["short", "medium", "long", "curly", "bun"] as const;
-const SHIRTS = ["tee", "hoodie", "sweater"] as const;
-const BOTTOMS = ["pants", "skirt"] as const;
-const SHOES = ["sneakers", "boots", "sandals"] as const;
+const HAIRSTYLES = [
+  "short",
+  "medium",
+  "long",
+  "curly",
+  "bun",
+  "ponytail",
+  "bangs",
+] as const;
+const SHIRTS = ["tee", "hoodie", "sweater", "jacket", "polo", "tank", "blazer"] as const;
+const BOTTOMS = ["pants", "skirt", "shorts", "dress"] as const;
+const SHOES = ["sneakers", "boots", "sandals", "heels", "loafers"] as const;
+const ACCESSORIES = ["none", "glasses", "hat", "headphones"] as const;
+const SKIN_TONES = ["#f5d0b5", "#e8c4a8", "#d4a574", "#c68642", "#8d5524", "#ffdbac"];
 const COLORS = [
   "#7c5cbf",
   "#e07a5f",
@@ -17,6 +27,8 @@ const COLORS = [
   "#ffd166",
   "#118ab2",
   "#1a1a2e",
+  "#ffffff",
+  "#2d6a4f",
 ];
 
 interface Props {
@@ -26,80 +38,66 @@ interface Props {
 }
 
 export function AvatarEditor({ initial, onSave, submitLabel = "Save Avatar" }: Props) {
-  const [avatar, setAvatar] = useState<AvatarConfig>(initial);
+  const [avatar, setAvatar] = useState<AvatarConfig>({
+    ...initial,
+    accessory: initial.accessory ?? "none",
+    skinTone: initial.skinTone ?? "#f5d0b5",
+  });
 
   const patch = (partial: Partial<AvatarConfig>) =>
     setAvatar((a) => ({ ...a, ...partial }));
 
   return (
     <div className="grid gap-8 lg:grid-cols-2">
-      <div className="card flex flex-col items-center justify-center bg-cozy-100">
+      <div className="card flex flex-col items-center justify-center bg-gradient-to-b from-cozy-100 to-plum-50">
         <AvatarPreview avatar={avatar} size="lg" />
         <p className="mt-4 text-sm text-cozy-600">Live preview</p>
       </div>
 
-      <div className="space-y-5">
-        <Field label="Hairstyle">
+      <div className="max-h-[70vh] space-y-5 overflow-y-auto pr-1">
+        <Field label="Skin tone">
           <div className="flex flex-wrap gap-2">
-            {HAIRSTYLES.map((h) => (
+            {SKIN_TONES.map((c) => (
               <button
-                key={h}
+                key={c}
                 type="button"
-                onClick={() => patch({ hairstyle: h })}
-                className={`rounded-lg px-3 py-1.5 text-sm capitalize ${
-                  avatar.hairstyle === h
-                    ? "bg-plum-600 text-white"
-                    : "bg-cozy-200 text-cozy-800 hover:bg-cozy-300"
+                onClick={() => patch({ skinTone: c })}
+                className={`h-9 w-9 rounded-full border-2 ${
+                  avatar.skinTone === c ? "border-plum-700 scale-110" : "border-cozy-300"
                 }`}
-              >
-                {h}
-              </button>
+                style={{ backgroundColor: c }}
+              />
             ))}
           </div>
+        </Field>
+
+        <Field label="Hairstyle">
+          <OptionRow
+            options={HAIRSTYLES}
+            value={avatar.hairstyle}
+            onChange={(hairstyle) => patch({ hairstyle })}
+          />
         </Field>
 
         <Field label="Hair color">
           <ColorRow value={avatar.hairColor} onChange={(hairColor) => patch({ hairColor })} />
         </Field>
 
-        <Field label="Shirt style">
-          <div className="flex flex-wrap gap-2">
-            {SHIRTS.map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => patch({ shirtStyle: s })}
-                className={`rounded-lg px-3 py-1.5 text-sm capitalize ${
-                  avatar.shirtStyle === s
-                    ? "bg-plum-600 text-white"
-                    : "bg-cozy-200"
-                }`}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-        </Field>
-
-        <Field label="Shirt color">
+        <Field label="Top">
+          <OptionRow
+            options={SHIRTS}
+            value={avatar.shirtStyle}
+            onChange={(shirtStyle) => patch({ shirtStyle })}
+          />
           <ColorRow value={avatar.shirtColor} onChange={(shirtColor) => patch({ shirtColor })} />
         </Field>
 
         <Field label="Bottom">
-          <div className="flex gap-2">
-            {BOTTOMS.map((b) => (
-              <button
-                key={b}
-                type="button"
-                onClick={() => patch({ bottomStyle: b })}
-                className={`rounded-lg px-3 py-1.5 text-sm capitalize ${
-                  avatar.bottomStyle === b ? "bg-plum-600 text-white" : "bg-cozy-200"
-                }`}
-              >
-                {b}
-              </button>
-            ))}
-          </div>
+          <OptionRow
+            options={BOTTOMS}
+            value={avatar.bottomStyle}
+            onChange={(bottomStyle) => patch({ bottomStyle })}
+          />
           <ColorRow
             value={avatar.bottomColor}
             onChange={(bottomColor) => patch({ bottomColor })}
@@ -107,20 +105,19 @@ export function AvatarEditor({ initial, onSave, submitLabel = "Save Avatar" }: P
         </Field>
 
         <Field label="Shoes">
-          <div className="flex flex-wrap gap-2">
-            {SHOES.map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => patch({ shoes: s })}
-                className={`rounded-lg px-3 py-1.5 text-sm capitalize ${
-                  avatar.shoes === s ? "bg-plum-600 text-white" : "bg-cozy-200"
-                }`}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
+          <OptionRow
+            options={SHOES}
+            value={avatar.shoes}
+            onChange={(shoes) => patch({ shoes })}
+          />
+        </Field>
+
+        <Field label="Accessory">
+          <OptionRow
+            options={ACCESSORIES}
+            value={avatar.accessory}
+            onChange={(accessory) => patch({ accessory })}
+          />
         </Field>
 
         <button type="button" className="btn-primary w-full" onClick={() => onSave(avatar)}>
@@ -140,6 +137,33 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+function OptionRow<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: readonly T[];
+  value: T;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {options.map((o) => (
+        <button
+          key={o}
+          type="button"
+          onClick={() => onChange(o)}
+          className={`rounded-lg px-3 py-1.5 text-sm capitalize ${
+            value === o ? "bg-plum-600 text-white" : "bg-cozy-200 text-cozy-800 hover:bg-cozy-300"
+          }`}
+        >
+          {o}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function ColorRow({
   value,
   onChange,
@@ -155,7 +179,7 @@ function ColorRow({
           type="button"
           onClick={() => onChange(c)}
           className={`h-8 w-8 rounded-full border-2 transition ${
-            value === c ? "border-plum-700 scale-110" : "border-transparent"
+            value === c ? "border-plum-700 scale-110" : "border-cozy-300"
           }`}
           style={{ backgroundColor: c }}
           aria-label={`Color ${c}`}

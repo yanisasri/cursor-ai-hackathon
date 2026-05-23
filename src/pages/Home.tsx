@@ -15,15 +15,29 @@ export function Home() {
     <>
       <Navbar />
       <main className="mx-auto max-w-7xl px-4 py-8">
+        <section className="mb-8 rounded-2xl bg-gradient-to-r from-plum-600 to-plum-700 px-6 py-8 text-white shadow-lg">
+          <p className="text-sm font-medium uppercase tracking-wide opacity-90">
+            Your social hub, reimagined
+          </p>
+          <h1 className="mt-2 font-display text-2xl font-bold sm:text-3xl">
+            Hang out online — no plan, no pressure, no endless group chat.
+          </h1>
+          <p className="mt-3 max-w-2xl text-sm opacity-95 sm:text-base">
+            Hangout Hub gives you cozy virtual spaces, live friend presence, shared
+            calendars, and fun decision tools — everything you need to actually see your
+            people again.
+          </p>
+        </section>
+
         <div className="flex flex-col gap-8 lg:flex-row">
           <div className="flex-1">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
-                <h1 className="font-display text-2xl font-bold text-cozy-900">
+                <h2 className="font-display text-xl font-bold text-cozy-900">
                   Your virtual areas
-                </h1>
+                </h2>
                 <p className="text-sm text-cozy-600">
-                  Hang out online without needing a reason — max 8 people per room.
+                  Pick a room and drop in — max 8 friends per space.
                 </p>
               </div>
               <Link to="/create-room" className="btn-primary">
@@ -33,7 +47,10 @@ export function Home() {
 
             {myRooms.length === 0 ? (
               <div className="card mt-8 text-center">
-                <p className="text-cozy-600">No rooms yet. Create your first virtual hangout!</p>
+                <p className="text-cozy-600">
+                  No rooms yet. Create your first virtual hangout — your demo friends
+                  Alex, Sam & Jordan can join!
+                </p>
                 <Link to="/create-room" className="btn-primary mt-4 inline-block">
                   Create a room
                 </Link>
