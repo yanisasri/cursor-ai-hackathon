@@ -1,34 +1,53 @@
-export type Hairstyle =
-  | "short"
-  | "medium"
-  | "long"
-  | "curly"
-  | "bun"
-  | "ponytail"
-  | "bangs";
-export type BottomStyle = "pants" | "skirt" | "shorts" | "dress";
-export type ShirtStyle =
-  | "tee"
-  | "hoodie"
-  | "sweater"
-  | "jacket"
-  | "polo"
-  | "tank"
-  | "blazer";
-export type ShoesStyle = "sneakers" | "boots" | "sandals" | "heels" | "loafers";
-export type Accessory = "none" | "glasses" | "hat" | "headphones";
-
 export interface AvatarConfig {
-  hairstyle: Hairstyle;
-  hairColor: string;
-  shirtStyle: ShirtStyle;
-  shirtColor: string;
-  bottomStyle: BottomStyle;
-  bottomColor: string;
-  shoes: ShoesStyle;
-  accessory: Accessory;
+  /** Stable DiceBear seed — set once so edits do not reshuffle the face. */
+  seed?: string;
   skinTone: string;
+  hairColor: string;
+  eyesColor: string;
+  mouthColor: string;
+  /** Lorelei hair variant 1–48 */
+  hairIndex: number;
+  /** Lorelei eyes variant 1–24 */
+  eyesIndex: number;
+  /** Lorelei eyebrows variant 1–13 */
+  eyebrowsIndex: number;
+  /** Index into LORELEI_MOUTHS */
+  mouthIndex: number;
+  /** 0 = none, 1–5 = glasses variant */
+  glassesIndex: number;
+  /** 0 = none, 1–3 = earrings variant */
+  earringsIndex: number;
+  freckles: boolean;
 }
+
+export const LORELEI_MOUTHS = [
+  "happy01",
+  "happy02",
+  "happy03",
+  "happy04",
+  "happy05",
+  "happy06",
+  "happy07",
+  "happy08",
+  "happy09",
+  "happy10",
+  "happy11",
+  "happy12",
+  "happy13",
+  "happy14",
+  "happy15",
+  "happy16",
+  "happy17",
+  "happy18",
+] as const;
+
+export const AVATAR_LIMITS = {
+  hair: 48,
+  eyes: 24,
+  eyebrows: 13,
+  glasses: 5,
+  earrings: 3,
+} as const;
 
 export interface User {
   id: string;
@@ -168,15 +187,18 @@ export interface RoomMessage {
 }
 
 export const DEFAULT_AVATAR: AvatarConfig = {
-  hairstyle: "medium",
-  hairColor: "#4a3728",
-  shirtStyle: "tee",
-  shirtColor: "#7c5cbf",
-  bottomStyle: "pants",
-  bottomColor: "#3d4f5f",
-  shoes: "sneakers",
-  accessory: "none",
+  seed: "default-avatar",
   skinTone: "#f5d0b5",
+  hairColor: "#4a3728",
+  eyesColor: "#000000",
+  mouthColor: "#000000",
+  hairIndex: 14,
+  eyesIndex: 1,
+  eyebrowsIndex: 1,
+  mouthIndex: 0,
+  glassesIndex: 0,
+  earringsIndex: 0,
+  freckles: false,
 };
 
 export function getDisplayAvatar(user: User): AvatarConfig {

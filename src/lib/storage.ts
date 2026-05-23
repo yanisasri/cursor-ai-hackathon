@@ -12,7 +12,50 @@ import type {
   User,
   VirtualRoom,
 } from "../types";
-import { ARCHIVE_DAYS, DEFAULT_AVATAR } from "../types";
+import { ARCHIVE_DAYS, DEFAULT_AVATAR, type AvatarConfig } from "../types";
+
+/** Migrate legacy avatar fields (pre-Lorelei) into the new shape. */
+function migrateAvatar(raw: Partial<AvatarConfig> & Record<string, unknown>): AvatarConfig {
+  if (typeof raw.hairIndex === "number") {
+    const merged = { ...DEFAULT_AVATAR, ...raw };
+    return {
+      ...merged,
+      seed:
+        typeof raw.seed === "string"
+          ? raw.seed
+          : `av-${merged.hairIndex}-${merged.eyesIndex}-${merged.mouthIndex}`,
+    };
+  }
+
+  const legacyHair: Record<string, number> = {
+    short: 4,
+    medium: 14,
+    long: 32,
+    curly: 22,
+    bun: 38,
+    ponytail: 28,
+    bangs: 8,
+  };
+
+  const hairstyle = String(raw.hairstyle ?? "medium");
+  const accessory = String(raw.accessory ?? "none");
+
+  return {
+    seed: `legacy-${legacyHair[hairstyle] ?? DEFAULT_AVATAR.hairIndex}-e${typeof raw.eyesIndex === "number" ? raw.eyesIndex : DEFAULT_AVATAR.eyesIndex}`,
+    skinTone: String(raw.skinTone ?? DEFAULT_AVATAR.skinTone),
+    hairColor: String(raw.hairColor ?? DEFAULT_AVATAR.hairColor),
+    eyesColor: DEFAULT_AVATAR.eyesColor,
+    mouthColor: DEFAULT_AVATAR.mouthColor,
+    hairIndex: legacyHair[hairstyle] ?? DEFAULT_AVATAR.hairIndex,
+    eyesIndex: typeof raw.eyesIndex === "number" ? raw.eyesIndex : DEFAULT_AVATAR.eyesIndex,
+    eyebrowsIndex:
+      typeof raw.eyebrowsIndex === "number" ? raw.eyebrowsIndex : DEFAULT_AVATAR.eyebrowsIndex,
+    mouthIndex: typeof raw.mouthIndex === "number" ? raw.mouthIndex : DEFAULT_AVATAR.mouthIndex,
+    glassesIndex: accessory === "glasses" ? 1 : DEFAULT_AVATAR.glassesIndex,
+    earringsIndex: DEFAULT_AVATAR.earringsIndex,
+    freckles: Boolean(raw.freckles),
+  };
+}
 
 const KEYS = {
   users: "hangout_users",
@@ -51,12 +94,7 @@ export function getUsers(): User[] {
 function migrateUsers(users: User[]): User[] {
   return users.map((u) => ({
     ...u,
-    avatar: {
-      ...DEFAULT_AVATAR,
-      ...u.avatar,
-      accessory: u.avatar?.accessory ?? "none",
-      skinTone: u.avatar?.skinTone ?? "#f5d0b5",
-    },
+    avatar: migrateAvatar((u.avatar ?? {}) as Partial<AvatarConfig> & Record<string, unknown>),
   }));
 }
 
@@ -241,15 +279,18 @@ export function seedDemoFriends(currentUserId: string): void {
       password: "demo123",
       displayName: "Alex",
       avatar: {
-        hairstyle: "short",
-        hairColor: "#2c1810",
-        shirtStyle: "hoodie",
-        shirtColor: "#e07a5f",
-        bottomStyle: "pants",
-        bottomColor: "#1d3557",
-        shoes: "sneakers",
-        accessory: "headphones",
+        seed: "demo-alex",
         skinTone: "#e8c4a8",
+        hairColor: "#2c1810",
+        eyesColor: "#000000",
+        mouthColor: "#000000",
+        hairIndex: 4,
+        eyesIndex: 3,
+        eyebrowsIndex: 2,
+        mouthIndex: 1,
+        glassesIndex: 0,
+        earringsIndex: 0,
+        freckles: false,
       },
       friendIds: [currentUserId, DEMO_FRIEND_IDS.sam, DEMO_FRIEND_IDS.jordan],
       online: true,
@@ -261,15 +302,18 @@ export function seedDemoFriends(currentUserId: string): void {
       password: "demo123",
       displayName: "Sam",
       avatar: {
-        hairstyle: "curly",
-        hairColor: "#8b5a2b",
-        shirtStyle: "sweater",
-        shirtColor: "#81b29a",
-        bottomStyle: "skirt",
-        bottomColor: "#f4a261",
-        shoes: "boots",
-        accessory: "glasses",
+        seed: "demo-sam",
         skinTone: "#d4a574",
+        hairColor: "#8b5a2b",
+        eyesColor: "#000000",
+        mouthColor: "#000000",
+        hairIndex: 22,
+        eyesIndex: 5,
+        eyebrowsIndex: 4,
+        mouthIndex: 2,
+        glassesIndex: 2,
+        earringsIndex: 1,
+        freckles: true,
       },
       friendIds: [currentUserId, DEMO_FRIEND_IDS.alex, DEMO_FRIEND_IDS.jordan],
       online: true,
@@ -281,15 +325,18 @@ export function seedDemoFriends(currentUserId: string): void {
       password: "demo123",
       displayName: "Jordan",
       avatar: {
-        hairstyle: "bun",
-        hairColor: "#1a1a2e",
-        shirtStyle: "jacket",
-        shirtColor: "#9b5de5",
-        bottomStyle: "pants",
-        bottomColor: "#264653",
-        shoes: "sneakers",
-        accessory: "hat",
+        seed: "demo-jordan",
         skinTone: "#c68642",
+        hairColor: "#1a1a2e",
+        eyesColor: "#000000",
+        mouthColor: "#000000",
+        hairIndex: 38,
+        eyesIndex: 8,
+        eyebrowsIndex: 6,
+        mouthIndex: 4,
+        glassesIndex: 0,
+        earringsIndex: 2,
+        freckles: false,
       },
       friendIds: [currentUserId, DEMO_FRIEND_IDS.alex, DEMO_FRIEND_IDS.sam],
       online: true,
