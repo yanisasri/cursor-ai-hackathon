@@ -12,7 +12,7 @@ import type {
   User,
   VirtualRoom,
 } from "../types";
-import { DEFAULT_AVATAR } from "../types";
+import { DEFAULT_AVATAR, SUGGESTION_CATEGORIES } from "../types";
 
 function throwIfError(error: { message: string } | null): void {
   if (error) throw new Error(error.message);
@@ -424,13 +424,18 @@ export const supabaseApi = {
       .select("room_id,label")
       .not("room_id", "is", null);
     throwIfError(error);
-    const out: Record<string, string[]> = {};
+    const builtInCategoryIds = new Set(SUGGESTION_CATEGORIES.map((c) => c.id));
+    const out: Record<string, Set<string>> = {};
     for (const row of data ?? []) {
       const roomId = String(row.room_id);
-      if (!out[roomId]) out[roomId] = [];
-      out[roomId].push(String(row.label).toLowerCase());
+      const normalized = String(row.label).trim().toLowerCase();
+      if (!normalized || builtInCategoryIds.has(normalized)) continue;
+      if (!out[roomId]) out[roomId] = new Set<string>();
+      out[roomId].add(normalized);
     }
-    return out;
+    return Object.fromEntries(
+      Object.entries(out).map(([roomId, labels]) => [roomId, Array.from(labels)])
+    );
   },
 
   async saveSuggestionCategoriesByRoom(categoriesByRoom: Record<string, string[]>): Promise<void> {

@@ -28,15 +28,31 @@ export function SuggestionsPanel({ roomId }: { roomId: string }) {
   const [categoryMsg, setCategoryMsg] = useState("");
   const [imagePreview, setImagePreview] = useState<string | undefined>();
 
-  const customCategories = suggestionCategoriesByRoom[roomId] ?? [];
-  const categoryOptions = [
-    ...SUGGESTION_CATEGORIES,
-    ...customCategories.map((c) => ({
-      id: c,
-      label: c[0].toUpperCase() + c.slice(1),
-      emoji: "🏷️",
-    })),
-  ];
+  const categoryOptions = useMemo(() => {
+    const builtInIds = new Set(SUGGESTION_CATEGORIES.map((c) => c.id));
+    const seen = new Set<string>();
+    const customCategories = (suggestionCategoriesByRoom[roomId] ?? [])
+      .map((c) => c.trim().toLowerCase())
+      .filter((c) => c.length > 0)
+      .filter((c) => !builtInIds.has(c))
+      .filter((c) => {
+        if (seen.has(c)) return false;
+        seen.add(c);
+        return true;
+      });
+
+    return [
+      ...SUGGESTION_CATEGORIES,
+      ...customCategories.map((c) => ({
+        id: c,
+        label: c[0].toUpperCase() + c.slice(1),
+        emoji: "🏷️",
+      })),
+    ];
+  }, [roomId, suggestionCategoriesByRoom]);
+  const customCategories = categoryOptions
+    .map((c) => c.id)
+    .filter((id) => !SUGGESTION_CATEGORIES.some((builtIn) => builtIn.id === id));
 
   const active = useMemo(
     () =>
