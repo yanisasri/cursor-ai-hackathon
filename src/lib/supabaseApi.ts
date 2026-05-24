@@ -12,7 +12,7 @@ import type {
   User,
   VirtualRoom,
 } from "../types";
-import { DEFAULT_AVATAR } from "../types";
+import { DEFAULT_AVATAR, SUGGESTION_CATEGORIES } from "../types";
 
 function throwIfError(error: { message: string } | null): void {
   if (error) throw new Error(error.message);
@@ -20,6 +20,56 @@ function throwIfError(error: { message: string } | null): void {
 
 function inFilter(ids: string[]): string {
   return `(${ids.map((id) => `"${id}"`).join(",")})`;
+}
+
+const LEGACY_HAIR_BY_INDEX: Record<number, string> = {
+  4: "short",
+  8: "bangs",
+  14: "medium",
+  22: "curly",
+  28: "ponytail",
+  32: "long",
+  38: "bun",
+};
+
+function legacyHairstyleFromIndex(hairIndex: number): string {
+  const exact = LEGACY_HAIR_BY_INDEX[hairIndex];
+  if (exact) return exact;
+  if (hairIndex <= 7) return "short";
+  if (hairIndex <= 12) return "bangs";
+  if (hairIndex <= 20) return "medium";
+  if (hairIndex <= 26) return "curly";
+  if (hairIndex <= 31) return "ponytail";
+  if (hairIndex <= 36) return "long";
+  return "bun";
+}
+
+function hairIndexFromLegacy(hairstyle: unknown): number {
+  const normalized = String(hairstyle ?? "").toLowerCase();
+  const map: Record<string, number> = {
+    short: 4,
+    bangs: 8,
+    medium: 14,
+    curly: 22,
+    ponytail: 28,
+    long: 32,
+    bun: 38,
+  };
+  return map[normalized] ?? DEFAULT_AVATAR.hairIndex;
+}
+
+function toLegacyAvatarColumns(avatar: User["avatar"]) {
+  return {
+    hairstyle: legacyHairstyleFromIndex(avatar.hairIndex),
+    hair_color: avatar.hairColor,
+    shirt_style: "tee",
+    shirt_color: "#7c5cbf",
+    bottom_style: "pants",
+    bottom_color: "#1d3557",
+    shoes: "sneakers",
+    accessory: avatar.glassesIndex > 0 ? "glasses" : "none",
+    skin_tone: avatar.skinTone,
+  };
 }
 
 export const supabaseApi = {
@@ -42,15 +92,17 @@ export const supabaseApi = {
 
     const { error: avatarError } = await supabase.from("user_avatars").upsert({
       user_id: input.id,
-      hairstyle: input.avatar.hairstyle,
-      hair_color: input.avatar.hairColor,
-      shirt_style: input.avatar.shirtStyle,
-      shirt_color: input.avatar.shirtColor,
-      bottom_style: input.avatar.bottomStyle,
-      bottom_color: input.avatar.bottomColor,
-      shoes: input.avatar.shoes,
-      accessory: input.avatar.accessory,
-      skin_tone: input.avatar.skinTone,
+      ...toLegacyAvatarColumns(input.avatar),
+      seed: input.avatar.seed ?? null,
+      eyes_color: input.avatar.eyesColor,
+      mouth_color: input.avatar.mouthColor,
+      hair_index: input.avatar.hairIndex,
+      eyes_index: input.avatar.eyesIndex,
+      eyebrows_index: input.avatar.eyebrowsIndex,
+      mouth_index: input.avatar.mouthIndex,
+      glasses_index: input.avatar.glassesIndex,
+      earrings_index: input.avatar.earringsIndex,
+      freckles: input.avatar.freckles,
       avatar_customized: input.avatarCustomized,
     });
     throwIfError(avatarError);
@@ -93,15 +145,35 @@ export const supabaseApi = {
       (avatars ?? []).map((a) => [
         String(a.user_id),
         {
-          hairstyle: a.hairstyle as User["avatar"]["hairstyle"],
-          hairColor: String(a.hair_color),
-          shirtStyle: a.shirt_style as User["avatar"]["shirtStyle"],
-          shirtColor: String(a.shirt_color),
-          bottomStyle: a.bottom_style as User["avatar"]["bottomStyle"],
-          bottomColor: String(a.bottom_color),
-          shoes: a.shoes as User["avatar"]["shoes"],
-          accessory: a.accessory as User["avatar"]["accessory"],
-          skinTone: String(a.skin_tone),
+          seed: typeof a.seed === "string" ? a.seed : DEFAULT_AVATAR.seed,
+          skinTone: String(a.skin_tone ?? DEFAULT_AVATAR.skinTone),
+          hairColor: String(a.hair_color ?? DEFAULT_AVATAR.hairColor),
+          eyesColor: String(a.eyes_color ?? DEFAULT_AVATAR.eyesColor),
+          mouthColor: String(a.mouth_color ?? DEFAULT_AVATAR.mouthColor),
+          hairIndex:
+            typeof a.hair_index === "number"
+              ? a.hair_index
+              : hairIndexFromLegacy(a.hairstyle),
+          eyesIndex:
+            typeof a.eyes_index === "number" ? a.eyes_index : DEFAULT_AVATAR.eyesIndex,
+          eyebrowsIndex:
+            typeof a.eyebrows_index === "number"
+              ? a.eyebrows_index
+              : DEFAULT_AVATAR.eyebrowsIndex,
+          mouthIndex:
+            typeof a.mouth_index === "number" ? a.mouth_index : DEFAULT_AVATAR.mouthIndex,
+          glassesIndex:
+            typeof a.glasses_index === "number"
+              ? a.glasses_index
+              : String(a.accessory ?? "none").toLowerCase() === "glasses"
+                ? 1
+                : DEFAULT_AVATAR.glassesIndex,
+          earringsIndex:
+            typeof a.earrings_index === "number"
+              ? a.earrings_index
+              : DEFAULT_AVATAR.earringsIndex,
+          freckles:
+            typeof a.freckles === "boolean" ? a.freckles : DEFAULT_AVATAR.freckles,
           avatarCustomized: Boolean(a.avatar_customized),
         },
       ])
@@ -126,19 +198,7 @@ export const supabaseApi = {
         displayName: String(u.display_name),
         avatar: {
           ...DEFAULT_AVATAR,
-          ...(av
-            ? {
-                hairstyle: av.hairstyle,
-                hairColor: av.hairColor,
-                shirtStyle: av.shirtStyle,
-                shirtColor: av.shirtColor,
-                bottomStyle: av.bottomStyle,
-                bottomColor: av.bottomColor,
-                shoes: av.shoes,
-                accessory: av.accessory,
-                skinTone: av.skinTone,
-              }
-            : {}),
+          ...(av ?? {}),
         },
         friendIds: Array.from(friendMap.get(String(u.id)) ?? []),
         online: Boolean(u.is_online),
@@ -157,15 +217,17 @@ export const supabaseApi = {
     }));
     const avatarRows = users.map((u) => ({
       user_id: u.id,
-      hairstyle: u.avatar.hairstyle,
-      hair_color: u.avatar.hairColor,
-      shirt_style: u.avatar.shirtStyle,
-      shirt_color: u.avatar.shirtColor,
-      bottom_style: u.avatar.bottomStyle,
-      bottom_color: u.avatar.bottomColor,
-      shoes: u.avatar.shoes,
-      accessory: u.avatar.accessory,
-      skin_tone: u.avatar.skinTone,
+      ...toLegacyAvatarColumns(u.avatar),
+      seed: u.avatar.seed ?? null,
+      eyes_color: u.avatar.eyesColor,
+      mouth_color: u.avatar.mouthColor,
+      hair_index: u.avatar.hairIndex,
+      eyes_index: u.avatar.eyesIndex,
+      eyebrows_index: u.avatar.eyebrowsIndex,
+      mouth_index: u.avatar.mouthIndex,
+      glasses_index: u.avatar.glassesIndex,
+      earrings_index: u.avatar.earringsIndex,
+      freckles: u.avatar.freckles,
       avatar_customized: Boolean(u.avatarCustomized),
     }));
     const pairSet = new Set<string>();
@@ -424,13 +486,18 @@ export const supabaseApi = {
       .select("room_id,label")
       .not("room_id", "is", null);
     throwIfError(error);
-    const out: Record<string, string[]> = {};
+    const builtInCategoryIds = new Set(SUGGESTION_CATEGORIES.map((c) => c.id));
+    const out: Record<string, Set<string>> = {};
     for (const row of data ?? []) {
       const roomId = String(row.room_id);
-      if (!out[roomId]) out[roomId] = [];
-      out[roomId].push(String(row.label).toLowerCase());
+      const normalized = String(row.label).trim().toLowerCase();
+      if (!normalized || builtInCategoryIds.has(normalized)) continue;
+      if (!out[roomId]) out[roomId] = new Set<string>();
+      out[roomId].add(normalized);
     }
-    return out;
+    return Object.fromEntries(
+      Object.entries(out).map(([roomId, labels]) => [roomId, Array.from(labels)])
+    );
   },
 
   async saveSuggestionCategoriesByRoom(categoriesByRoom: Record<string, string[]>): Promise<void> {

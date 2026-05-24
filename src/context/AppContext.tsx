@@ -43,6 +43,7 @@ import {
 } from "../lib/storage";
 import {
   MAX_ROOM_MEMBERS,
+  SUGGESTION_CATEGORIES,
   getPersonalRoomGuests,
   isPersonalRoomFull,
   type AvatarConfig,
@@ -592,6 +593,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     (roomId: string, categoryName: string) => {
       const normalized = categoryName.trim().toLowerCase();
       if (!normalized) return;
+      const isBuiltIn = SUGGESTION_CATEGORIES.some((c) => c.id === normalized);
+      if (isBuiltIn) return;
       const all = suggestionCategoriesByRoom;
       const existing = all[roomId] ?? [];
       if (existing.includes(normalized)) return;
