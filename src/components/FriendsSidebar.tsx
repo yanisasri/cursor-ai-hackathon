@@ -59,7 +59,7 @@ export function FriendsSidebar() {
         <ul className="max-h-80 space-y-3 overflow-y-auto">
           {friends.length === 0 ? (
             <li className="text-sm text-cozy-500">
-              No friends yet. Demo friends are added when you sign up.
+              No friends yet. Add friends by email in the sidebar.
             </li>
           ) : (
             friends.map((f) => (

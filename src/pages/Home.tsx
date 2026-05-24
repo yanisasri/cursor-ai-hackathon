@@ -48,8 +48,7 @@ export function Home() {
             {myRooms.length === 0 ? (
               <div className="card mt-8 text-center">
                 <p className="text-cozy-600">
-                  No rooms yet. Create your first virtual hangout — up to 7 demo
-                  friends can join (8 people total)!
+                  No rooms yet. Create your first virtual hangout and invite friends!
                 </p>
                 <Link to="/create-room" className="btn-primary mt-4 inline-block">
                   Create a room

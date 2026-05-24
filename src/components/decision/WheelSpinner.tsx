@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useApp } from "../../context/AppContext";
 
 const SEGMENT_COLORS = [
   "#7c5cbf",
@@ -11,32 +12,70 @@ const SEGMENT_COLORS = [
   "#ffd166",
 ];
 
-export function WheelSpinner() {
-  const [items, setItems] = useState("Movie A, Movie B, Movie C, Board games");
+interface Props {
+  roomId: string;
+}
+
+export function WheelSpinner({ roomId }: Props) {
+  const { user, users, getRoomDecisionOptions, getRoomDecisionTitle, notifyRoomDecision } =
+    useApp();
+  const roomOptions = getRoomDecisionOptions(roomId);
+  const decisionTitle = getRoomDecisionTitle(roomId);
+  const [items, setItems] = useState("");
   const [spinning, setSpinning] = useState(false);
   const [rotation, setRotation] = useState(0);
   const [winner, setWinner] = useState<string | null>(null);
 
+  const isReady = decisionTitle.length > 0 && roomOptions.length >= 2;
+  const actorName = users.find((u) => u.id === user?.id)?.displayName ?? "Someone";
+
+  useEffect(() => {
+    if (roomOptions.length > 0) {
+      setItems(roomOptions.join(", "));
+    } else {
+      setItems("");
+    }
+  }, [roomOptions.join("\0")]);
+
   const options = items.split(",").map((s) => s.trim()).filter(Boolean);
 
   const spin = () => {
-    if (options.length < 2 || spinning) return;
+    if (options.length < 2 || spinning || !user) return;
     setSpinning(true);
     setWinner(null);
+    notifyRoomDecision(
+      roomId,
+      "Wheel spinning",
+      `${actorName} spun the wheel for "${decisionTitle}"`
+    );
     const idx = Math.floor(Math.random() * options.length);
     const segment = 360 / options.length;
     const extra = 360 * 5 + (options.length - idx) * segment + segment / 2;
     setRotation((r) => r + extra);
+    const picked = options[idx];
     setTimeout(() => {
-      setWinner(options[idx]);
+      setWinner(picked);
       setSpinning(false);
+      notifyRoomDecision(
+        roomId,
+        "Wheel result",
+        `The wheel landed on "${picked}" for "${decisionTitle}"`
+      );
     }, 4000);
   };
+
+  if (!isReady) {
+    return (
+      <div className="rounded-xl border border-cozy-200 bg-cozy-50 p-4 text-sm text-cozy-600">
+        Save a decision title and options above to spin the wheel.
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-xl border border-cozy-200 p-4">
       <h4 className="font-semibold text-cozy-900">Decision wheel</h4>
-      <p className="text-sm text-cozy-500">When the group can&apos;t decide — spin it!</p>
+      <p className="text-sm text-cozy-500">{decisionTitle}</p>
       <input
         className="input-field mt-2"
         value={items}
@@ -62,9 +101,7 @@ export function WheelSpinner() {
         {spinning ? "Spinning…" : "Spin the wheel"}
       </button>
       {winner && (
-        <p className="mt-3 text-center text-lg font-semibold text-plum-700">
-          Winner: {winner}
-        </p>
+        <p className="mt-3 text-center text-lg font-semibold text-plum-700">Winner: {winner}</p>
       )}
     </div>
   );

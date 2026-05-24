@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useApp } from "../../context/AppContext";
 
 interface Props {
@@ -6,30 +6,42 @@ interface Props {
 }
 
 export function PollTool({ roomId }: Props) {
-  const { polls, user, createPoll, votePoll } = useApp();
-  const [question, setQuestion] = useState("");
-  const [options, setOptions] = useState("Pizza, Sushi, Tacos");
+  const { polls, user, createPoll, votePoll, getRoomDecisionOptions, getRoomDecisionTitle } =
+    useApp();
+  const [options, setOptions] = useState("");
 
+  const roomOptions = getRoomDecisionOptions(roomId);
+  const decisionTitle = getRoomDecisionTitle(roomId);
   const roomPolls = polls.filter((p) => p.roomId === roomId);
+  const isReady = decisionTitle.length > 0 && roomOptions.length >= 2;
+
+  useEffect(() => {
+    if (roomOptions.length > 0) {
+      setOptions(roomOptions.join(", "));
+    } else {
+      setOptions("");
+    }
+  }, [roomOptions.join("\0")]);
 
   const handleCreate = () => {
-    if (!question.trim()) return;
     const opts = options.split(",").map((o) => o.trim()).filter(Boolean);
     if (opts.length < 2) return;
-    createPoll(roomId, question, opts);
-    setQuestion("");
+    createPoll(roomId, opts);
   };
+
+  if (!isReady) {
+    return (
+      <div className="rounded-xl border border-cozy-200 bg-cozy-50 p-4 text-sm text-cozy-600">
+        Save a decision title and options above to start a poll.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-plum-200 bg-plum-50/50 p-4">
         <h4 className="font-semibold text-plum-800">Real-time poll</h4>
-        <input
-          className="input-field mt-2"
-          placeholder="What should we eat?"
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-        />
+        <p className="mt-1 text-sm text-cozy-600">{decisionTitle}</p>
         <input
           className="input-field mt-2"
           placeholder="Options (comma separated)"
@@ -60,7 +72,9 @@ export function PollTool({ roomId }: Props) {
                   >
                     <div className="flex justify-between">
                       <span>{opt.text}</span>
-                      <span>{opt.votes.length} votes ({pct}%)</span>
+                      <span>
+                        {opt.votes.length} votes ({pct}%)
+                      </span>
                     </div>
                     <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-cozy-200">
                       <div
