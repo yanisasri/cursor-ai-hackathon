@@ -189,7 +189,7 @@ export function PersonalRoomsPanel({
                 </div>
               )}
 
-              {!isOwner && user && (
+              {!isOwner && user && selectedOwner !== memberId && (
                 <div className="mt-3">
                   {canEnter ? (
                     <button
@@ -227,7 +227,7 @@ export function PersonalRoomsPanel({
                 </div>
               )}
 
-              {isOwner && (
+              {isOwner && selectedOwner !== memberId && (
                 <button
                   type="button"
                   className="btn-primary mt-3 w-full text-sm"
