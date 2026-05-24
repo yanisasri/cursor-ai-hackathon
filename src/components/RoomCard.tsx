@@ -91,7 +91,6 @@ export function RoomCard({ room }: Props) {
       </div>
       <div className="p-4">
         <h3 className="font-semibold text-cozy-900 group-hover:text-plum-700">{room.name}</h3>
-        <p className="text-sm text-cozy-500">{area?.label}</p>
       </div>
     </Link>
   );

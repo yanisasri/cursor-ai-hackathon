@@ -25,6 +25,7 @@ import {
   getSuggestions,
   getSuggestionCategoriesByRoom,
   getUsers,
+  linkExistingDemoFriends,
   saveCalendarConnections,
   saveCalendarEvents,
   saveCalendarSlots,
@@ -36,13 +37,14 @@ import {
   saveSuggestions,
   saveSuggestionCategoriesByRoom,
   saveUsers,
-  linkExistingDemoFriends,
   seedDemoFriends,
   setSessionUserId,
   verifyCredentials,
 } from "../lib/storage";
 import {
   MAX_ROOM_MEMBERS,
+  getPersonalRoomGuests,
+  isPersonalRoomFull,
   type AvatarConfig,
   type CalendarConnection,
   type CalendarEvent,
@@ -122,8 +124,9 @@ interface AppContextValue {
   ) => void;
   markNotificationRead: (id: string) => void;
   toggleOnline: (online: boolean) => void;
-  requestPersonalRoomAccess: (roomId: string, ownerId: string) => void;
-  grantPersonalRoomAccess: (roomId: string, ownerId: string, userId: string) => void;
+  requestPersonalRoomAccess: (roomId: string, ownerId: string) => { ok: boolean; error?: string };
+  grantPersonalRoomAccess: (roomId: string, ownerId: string, userId: string) => { ok: boolean; error?: string };
+  leavePersonalRoom: (roomId: string, ownerId: string) => void;
   canEnterPersonalRoom: (roomId: string, ownerId: string, userId: string) => boolean;
   ensureRoomSetup: (roomId: string) => void;
 }
@@ -704,13 +707,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const requestPersonalRoomAccess = useCallback(
     (roomId: string, ownerId: string) => {
-      if (!user) return;
+      if (!user) return { ok: false, error: "Not signed in." };
+      if (user.id === ownerId) return { ok: true };
       const all = personalRoomAccess;
       const idx = all.findIndex((a) => a.roomId === roomId && a.ownerId === ownerId);
-      if (idx < 0) return;
+      if (idx < 0) return { ok: false, error: "Room not found." };
       const entry = all[idx];
-      if (entry.grantedIds.includes(user.id)) return;
-      if (entry.pendingRequests.some((r) => r.userId === user.id)) return;
+      if (entry.grantedIds.includes(user.id)) return { ok: true };
+      if (entry.pendingRequests.some((r) => r.userId === user.id)) {
+        return { ok: false, error: "Request already pending." };
+      }
+      if (isPersonalRoomFull(entry)) {
+        return { ok: false, error: "This personal room is full (owner + 1 guest)." };
+      }
       const updated = [...all];
       updated[idx] = {
         ...entry,
@@ -720,6 +729,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ],
       };
       void savePersonalRoomAccess(updated).then(() => loadAll());
+      return { ok: true };
     },
     [user, personalRoomAccess, loadAll]
   );
@@ -728,8 +738,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     (roomId: string, ownerId: string, grantUserId: string) => {
       const all = personalRoomAccess;
       const idx = all.findIndex((a) => a.roomId === roomId && a.ownerId === ownerId);
-      if (idx < 0) return;
+      if (idx < 0) return { ok: false, error: "Room not found." };
       const entry = all[idx];
+      const guests = getPersonalRoomGuests(entry);
+      if (guests.length >= 1 && !guests.includes(grantUserId)) {
+        return { ok: false, error: "Room is full — only one guest at a time." };
+      }
       const updated = [...all];
       updated[idx] = {
         ...entry,
@@ -737,12 +751,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
         pendingRequests: entry.pendingRequests.filter((r) => r.userId !== grantUserId),
       };
       void savePersonalRoomAccess(updated).then(() => loadAll());
+      return { ok: true };
     },
     [personalRoomAccess, loadAll]
   );
 
+  const leavePersonalRoom = useCallback(
+    (roomId: string, ownerId: string) => {
+      if (!user || user.id === ownerId) return;
+      const all = personalRoomAccess;
+      const idx = all.findIndex((a) => a.roomId === roomId && a.ownerId === ownerId);
+      if (idx < 0) return;
+      const entry = all[idx];
+      if (!entry.grantedIds.includes(user.id)) return;
+      const updated = [...all];
+      updated[idx] = {
+        ...entry,
+        grantedIds: entry.grantedIds.filter((id) => id !== user.id),
+      };
+      void savePersonalRoomAccess(updated).then(() => loadAll());
+    },
+    [user, personalRoomAccess, loadAll]
+  );
+
   const canEnterPersonalRoom = useCallback(
     (roomId: string, ownerId: string, visitorId: string) => {
+      if (visitorId === ownerId) return true;
       const entry = personalRoomAccess.find(
         (a) => a.roomId === roomId && a.ownerId === ownerId
       );
@@ -797,6 +831,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toggleOnline,
       requestPersonalRoomAccess,
       grantPersonalRoomAccess,
+      leavePersonalRoom,
       canEnterPersonalRoom,
       ensureRoomSetup,
     }),
@@ -845,6 +880,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toggleOnline,
       requestPersonalRoomAccess,
       grantPersonalRoomAccess,
+      leavePersonalRoom,
       canEnterPersonalRoom,
       ensureRoomSetup,
     ]

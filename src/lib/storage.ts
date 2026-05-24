@@ -1,4 +1,5 @@
 import type {
+  AvatarConfig,
   CalendarConnection,
   CalendarEvent,
   CalendarSlot,
@@ -182,114 +183,222 @@ export async function savePersonalRoomAccess(access: PersonalRoomAccess[]): Prom
   await supabaseApi.savePersonalRoomAccess(access);
 }
 
-/** Stable demo friend emails so they persist across sessions */
+/** Stable demo friend IDs so they persist across sessions (7 friends + you = 8 max) */
 export const DEMO_FRIEND_IDS = {
-  alex: "alex@demo.com",
-  sam: "sam@demo.com",
-  jordan: "jordan@demo.com",
+  alex: "demo-friend-alex",
+  sam: "demo-friend-sam",
+  jordan: "demo-friend-jordan",
+  casey: "demo-friend-casey",
+  morgan: "demo-friend-morgan",
+  riley: "demo-friend-riley",
+  taylor: "demo-friend-taylor",
 } as const;
 
-export async function linkExistingDemoFriends(currentUserId: string): Promise<void> {
-  const users = await getUsers();
-  const demos = users.filter((u) => u.email.endsWith("@demo.com"));
-  const current = users.find((u) => u.id === currentUserId);
-  if (!current || demos.length === 0) return;
-  const merged = [...new Set([...current.friendIds, ...demos.map((d) => d.id)])];
-  await saveUsers(users.map((u) => (u.id === currentUserId ? { ...u, friendIds: merged } : u)));
+const ALL_DEMO_IDS = Object.values(DEMO_FRIEND_IDS);
+
+type DemoProfile = {
+  id: string;
+  email: string;
+  displayName: string;
+  avatar: AvatarConfig;
+};
+
+const DEMO_PROFILES: DemoProfile[] = [
+  {
+    id: DEMO_FRIEND_IDS.alex,
+    email: "alex@demo.com",
+    displayName: "Alex",
+    avatar: {
+      seed: "demo-alex",
+      skinTone: "#e8c4a8",
+      hairColor: "#2c1810",
+      eyesColor: "#000000",
+      mouthColor: "#000000",
+      hairIndex: 4,
+      eyesIndex: 3,
+      eyebrowsIndex: 2,
+      mouthIndex: 1,
+      glassesIndex: 0,
+      earringsIndex: 0,
+      freckles: false,
+    },
+  },
+  {
+    id: DEMO_FRIEND_IDS.sam,
+    email: "sam@demo.com",
+    displayName: "Sam",
+    avatar: {
+      seed: "demo-sam",
+      skinTone: "#d4a574",
+      hairColor: "#8b5a2b",
+      eyesColor: "#000000",
+      mouthColor: "#000000",
+      hairIndex: 22,
+      eyesIndex: 5,
+      eyebrowsIndex: 4,
+      mouthIndex: 2,
+      glassesIndex: 2,
+      earringsIndex: 1,
+      freckles: true,
+    },
+  },
+  {
+    id: DEMO_FRIEND_IDS.jordan,
+    email: "jordan@demo.com",
+    displayName: "Jordan",
+    avatar: {
+      seed: "demo-jordan",
+      skinTone: "#c68642",
+      hairColor: "#1a1a2e",
+      eyesColor: "#000000",
+      mouthColor: "#000000",
+      hairIndex: 38,
+      eyesIndex: 8,
+      eyebrowsIndex: 6,
+      mouthIndex: 4,
+      glassesIndex: 0,
+      earringsIndex: 2,
+      freckles: false,
+    },
+  },
+  {
+    id: DEMO_FRIEND_IDS.casey,
+    email: "casey@demo.com",
+    displayName: "Casey",
+    avatar: {
+      seed: "demo-casey",
+      skinTone: "#f5d0b5",
+      hairColor: "#5c4033",
+      eyesColor: "#000000",
+      mouthColor: "#000000",
+      hairIndex: 14,
+      eyesIndex: 2,
+      eyebrowsIndex: 1,
+      mouthIndex: 0,
+      glassesIndex: 0,
+      earringsIndex: 0,
+      freckles: false,
+    },
+  },
+  {
+    id: DEMO_FRIEND_IDS.morgan,
+    email: "morgan@demo.com",
+    displayName: "Morgan",
+    avatar: {
+      seed: "demo-morgan",
+      skinTone: "#d4a574",
+      hairColor: "#6a040f",
+      eyesColor: "#000000",
+      mouthColor: "#000000",
+      hairIndex: 28,
+      eyesIndex: 6,
+      eyebrowsIndex: 3,
+      mouthIndex: 1,
+      glassesIndex: 1,
+      earringsIndex: 0,
+      freckles: false,
+    },
+  },
+  {
+    id: DEMO_FRIEND_IDS.riley,
+    email: "riley@demo.com",
+    displayName: "Riley",
+    avatar: {
+      seed: "demo-riley",
+      skinTone: "#e8c4a8",
+      hairColor: "#3d005b",
+      eyesColor: "#000000",
+      mouthColor: "#000000",
+      hairIndex: 8,
+      eyesIndex: 4,
+      eyebrowsIndex: 2,
+      mouthIndex: 3,
+      glassesIndex: 0,
+      earringsIndex: 1,
+      freckles: true,
+    },
+  },
+  {
+    id: DEMO_FRIEND_IDS.taylor,
+    email: "taylor@demo.com",
+    displayName: "Taylor",
+    avatar: {
+      seed: "demo-taylor",
+      skinTone: "#c68642",
+      hairColor: "#4a3728",
+      eyesColor: "#000000",
+      mouthColor: "#000000",
+      hairIndex: 32,
+      eyesIndex: 7,
+      eyebrowsIndex: 5,
+      mouthIndex: 2,
+      glassesIndex: 0,
+      earringsIndex: 0,
+      freckles: false,
+    },
+  },
+];
+
+function buildDemoUser(profile: DemoProfile, currentUserId: string, passwordHash: string): User {
+  return {
+    id: profile.id,
+    email: profile.email,
+    password: passwordHash,
+    displayName: profile.displayName,
+    avatar: profile.avatar,
+    friendIds: [
+      currentUserId,
+      ...ALL_DEMO_IDS.filter((id) => id !== profile.id),
+    ],
+    online: true,
+    avatarCustomized: true,
+  };
 }
 
-export async function seedDemoFriends(currentUserId: string): Promise<void> {
-  const users = await getUsers();
+/** Create any missing demo users and link them to the current user */
+export async function ensureDemoFriends(currentUserId: string): Promise<void> {
+  let users = await getUsers();
   const current = users.find((u) => u.id === currentUserId);
   if (!current) return;
+  const passwordHash = await sha256("demo123");
 
-  const demoSeed: Array<Omit<User, "id" | "friendIds"> & { email: string }> = [
-    {
-      email: DEMO_FRIEND_IDS.alex,
-      password: await sha256("demo123"),
-      displayName: "Alex",
-      avatar: {
-        hairstyle: "short",
-        hairColor: "#2c1810",
-        shirtStyle: "hoodie",
-        shirtColor: "#e07a5f",
-        bottomStyle: "pants",
-        bottomColor: "#1d3557",
-        shoes: "sneakers",
-        accessory: "headphones",
-        skinTone: "#e8c4a8",
-      },
-      online: true,
-      avatarCustomized: true,
-    },
-    {
-      email: DEMO_FRIEND_IDS.sam,
-      password: await sha256("demo123"),
-      displayName: "Sam",
-      avatar: {
-        hairstyle: "curly",
-        hairColor: "#8b5a2b",
-        shirtStyle: "sweater",
-        shirtColor: "#81b29a",
-        bottomStyle: "skirt",
-        bottomColor: "#f4a261",
-        shoes: "boots",
-        accessory: "glasses",
-        skinTone: "#d4a574",
-      },
-      online: true,
-      avatarCustomized: true,
-    },
-    {
-      email: DEMO_FRIEND_IDS.jordan,
-      password: await sha256("demo123"),
-      displayName: "Jordan",
-      avatar: {
-        hairstyle: "bun",
-        hairColor: "#1a1a2e",
-        shirtStyle: "jacket",
-        shirtColor: "#9b5de5",
-        bottomStyle: "pants",
-        bottomColor: "#264653",
-        shoes: "sneakers",
-        accessory: "hat",
-        skinTone: "#c68642",
-      },
-      online: true,
-      avatarCustomized: true,
-    },
-  ];
-
-  const byEmail = new Map(users.map((u) => [u.email, u]));
-  const next = [...users];
-  for (const seed of demoSeed) {
-    if (byEmail.has(seed.email)) continue;
-    next.push({
-      id: generateId(),
-      email: seed.email,
-      password: seed.password,
-      displayName: seed.displayName,
-      avatar: seed.avatar,
-      friendIds: [],
-      online: seed.online,
-      avatarCustomized: seed.avatarCustomized,
-    });
+  for (const profile of DEMO_PROFILES) {
+    if (!users.some((u) => u.id === profile.id)) {
+      users = [...users, buildDemoUser(profile, currentUserId, passwordHash)];
+    }
   }
 
-  const demoIds = next.filter((u) => u.email.endsWith("@demo.com")).map((u) => u.id);
-  const withFriendGraph = next.map((u) => {
+  users = users.map((u) => {
     if (u.id === currentUserId) {
-      return { ...u, friendIds: [...new Set([...u.friendIds, ...demoIds])] };
-    }
-    if (demoIds.includes(u.id)) {
       return {
         ...u,
-        friendIds: [...new Set([...u.friendIds, currentUserId, ...demoIds.filter((id) => id !== u.id)])],
+        friendIds: [...new Set([...u.friendIds, ...ALL_DEMO_IDS])],
+      };
+    }
+    if (ALL_DEMO_IDS.includes(u.id as (typeof ALL_DEMO_IDS)[number])) {
+      return {
+        ...u,
+        friendIds: [
+          ...new Set([
+            ...u.friendIds,
+            currentUserId,
+            ...ALL_DEMO_IDS.filter((id) => id !== u.id),
+          ]),
+        ],
       };
     }
     return u;
   });
-  await saveUsers(withFriendGraph);
+
+  await saveUsers(users);
+}
+
+export async function linkExistingDemoFriends(currentUserId: string): Promise<void> {
+  await ensureDemoFriends(currentUserId);
+}
+
+export async function seedDemoFriends(currentUserId: string): Promise<void> {
+  await ensureDemoFriends(currentUserId);
 }
 
 export async function ensurePersonalRoomsForRoom(room: VirtualRoom): Promise<PersonalRoomAccess[]> {

@@ -2,13 +2,11 @@ import { useEffect, useState } from "react";
 import { useNavigate, Navigate } from "react-router-dom";
 import { Navbar } from "../components/Navbar";
 import { useApp } from "../context/AppContext";
-import { MAX_ROOM_MEMBERS, ROOM_AREAS } from "../types";
-import type { RoomArea } from "../types";
+import { MAX_ROOM_MEMBERS } from "../types";
 
 export function CreateRoom() {
   const { user, users, createRoom } = useApp();
   const navigate = useNavigate();
-  const [area, setArea] = useState<RoomArea>("house");
   const [name, setName] = useState("");
   const [maxMembers, setMaxMembers] = useState(8);
   const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
@@ -22,17 +20,23 @@ export function CreateRoom() {
 
   useEffect(() => {
     if (!initialized && friends.length > 0) {
-      setSelectedFriends(friends.map((f) => f.id));
+      setSelectedFriends(friends.slice(0, maxMembers - 1).map((f) => f.id));
       setInitialized(true);
     }
-  }, [friends, initialized]);
+  }, [friends, initialized, maxMembers]);
+
+  useEffect(() => {
+    setSelectedFriends((prev) => prev.slice(0, maxMembers - 1));
+  }, [maxMembers]);
 
   if (!user) return <Navigate to="/sign-in" replace />;
 
   const toggleFriend = (id: string) => {
-    setSelectedFriends((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
+    setSelectedFriends((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= maxMembers - 1) return prev;
+      return [...prev, id];
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -42,7 +46,7 @@ export function CreateRoom() {
     try {
       const room = await createRoom({
         name: name.trim(),
-        area,
+        area: "house",
         maxMembers,
         friendIds: selectedFriends,
         myNickname: myNickname.trim() || undefined,
@@ -59,31 +63,15 @@ export function CreateRoom() {
       <Navbar />
       <main className="mx-auto max-w-2xl px-4 py-8">
         <h1 className="font-display text-2xl font-bold">Create a new room</h1>
+        <p className="mt-1 text-sm text-cozy-600">
+          Every room uses the Cozy House map — hang out, plan, and decide together.
+        </p>
         <form onSubmit={handleSubmit} className="card mt-6 space-y-6">
           {error && (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
           )}
-          <div>
-            <p className="mb-2 text-sm font-medium">1. Pick an area</p>
-            <div className="grid grid-cols-2 gap-3">
-              {ROOM_AREAS.map((a) => (
-                <button
-                  key={a.id}
-                  type="button"
-                  onClick={() => setArea(a.id)}
-                  className={`rounded-xl border-2 p-4 text-left ${
-                    area === a.id ? "border-plum-500 bg-plum-50" : "border-cozy-200"
-                  }`}
-                >
-                  <span className="text-2xl">{a.emoji}</span>
-                  <p className="mt-1 font-medium">{a.label}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-
           <label className="block text-sm font-medium">
-            2. Virtual room name
+            1. Virtual room name
             <input
               className="input-field mt-1"
               required
@@ -94,7 +82,7 @@ export function CreateRoom() {
           </label>
 
           <label className="block text-sm font-medium">
-            Your nickname in this room (optional)
+            2. Your nickname in this room (optional)
             <input
               className="input-field mt-1"
               placeholder="e.g. Captain Chaos"
@@ -117,11 +105,14 @@ export function CreateRoom() {
                 )
               }
             />
+            <span className="mt-1 block text-xs text-cozy-500">
+              Includes you — pick up to {maxMembers - 1} friend{maxMembers - 1 === 1 ? "" : "s"} below.
+            </span>
           </label>
 
           <div>
             <p className="mb-2 text-sm font-medium">
-              4. Add friends (pre-selected — includes demo friends)
+              4. Add friends ({selectedFriends.length}/{maxMembers - 1} selected)
             </p>
             <div className="flex flex-wrap gap-2">
               {friends.length === 0 ? (
