@@ -6,7 +6,7 @@ Discord requires someone to start a voice call. Zoom needs a meeting. Games requ
 
 **Hangout Hub** is a low-pressure social platform: customizable avatars, virtual hangout spaces, shared calendars, decision tools, and friend coordination (max 8 people per room).
 
-**Live app:** [hangout-hub.vercel.app](http://hangout-hub.vercel.app)
+**Live app:** [hangoutt-hub.vercel.app](http://hangoutt-hub.vercel.app)
 
 ## Features
 
