@@ -20,6 +20,10 @@ interface Props {
   activeSubRoom: SubRoomType;
   activePersonalOwner?: string | null;
   onEnterSubRoom: (zone: SubRoomType, ownerId?: string) => void;
+  onPersonalRoomVisit?: (ownerId: string) => void;
+  onClearPersonalRoomVisit?: () => void;
+  onPersonalRoomHover?: (ownerId: string) => void;
+  onPersonalRoomHoverEnd?: () => void;
   voiceContext?: VoiceContextProps | null;
 }
 
@@ -548,6 +552,10 @@ export function VirtualWorld({
   activeSubRoom,
   activePersonalOwner,
   onEnterSubRoom,
+  onPersonalRoomVisit,
+  onClearPersonalRoomVisit,
+  onPersonalRoomHover,
+  onPersonalRoomHoverEnd,
   voiceContext,
 }: Props) {
   const {
@@ -556,11 +564,11 @@ export function VirtualWorld({
     personalRoomAccess,
     getRoomDisplayName,
     canEnterPersonalRoom,
-    requestPersonalRoomAccess,
   } = useApp();
   const [pos, setPos] = useState(DEFAULT_SPAWN);
   const posRef = useRef(DEFAULT_SPAWN);
   const [target, setTarget] = useState<{ x: number; y: number } | null>(null);
+  const [others, setOthers] = useState<Player[]>([]);
   const [personalPromptOwnerId, setPersonalPromptOwnerId] = useState<string | null>(null);
   const heldKeysRef = useHeldKeys(true);
   const lastZoneRef = useRef<string | null>(null);
@@ -667,22 +675,22 @@ export function VirtualWorld({
             const ownerId = String(z.ownerId ?? "");
             if (!ownerId) return;
             onEnterSubRoom("personal", ownerId);
-            if (user && ownerId !== user.id && !canEnterPersonalRoom(roomId, ownerId, user.id)) {
-              setPersonalPromptOwnerId(ownerId);
+            if (user && ownerId !== user.id) {
+              onPersonalRoomVisit?.(ownerId);
             } else {
-              setPersonalPromptOwnerId(null);
+              onClearPersonalRoomVisit?.();
             }
           } else {
             onEnterSubRoom(z.type);
-            setPersonalPromptOwnerId(null);
+            onClearPersonalRoomVisit?.();
           }
         }
         return;
       }
     }
     lastZoneRef.current = null;
-    setPersonalPromptOwnerId(null);
-  }, [pos, onEnterSubRoom, personalZones, canEnterPersonalRoom, roomId, user]);
+    onClearPersonalRoomVisit?.();
+  }, [pos, onEnterSubRoom, onClearPersonalRoomVisit, onPersonalRoomVisit, personalZones, roomId, user]);
 
   const goToZone = (z: {
     type: SubRoomType;
@@ -840,25 +848,35 @@ export function VirtualWorld({
           const canEnter = !!user && canEnterPersonalRoom(roomId, z.ownerId, user.id);
           const isActivePersonal =
             activeSubRoom === "personal" && activePersonalOwner === z.ownerId;
+
+          const zoneButtonClass = isHouse
+            ? [
+                "absolute overflow-visible rounded-xl transition-all duration-200",
+                isActivePersonal
+                  ? "ring-2 ring-plum-500 shadow-[0_0_16px_5px_rgba(147,51,234,0.22)]"
+                  : "hover:ring-2 hover:ring-indigo-400/50 hover:shadow-[0_0_14px_4px_rgba(99,102,241,0.2)]",
+              ].join(" ")
+            : [
+                "absolute overflow-hidden rounded-xl border-2 border-indigo-200 transition hover:brightness-95 hover:ring-2 hover:ring-indigo-300",
+                isActivePersonal ? "ring-2 ring-plum-500" : "",
+              ].join(" ");
+
           return (
             <button
               key={`personal-${z.ownerId}`}
               type="button"
-              onClick={() => goToZone(z)}
+              onClick={() => {
+                goToZone(z);
+                if (!isOwner) onPersonalRoomVisit?.(z.ownerId);
+              }}
+              onMouseEnter={() => {
+                if (!isOwner) onPersonalRoomHover?.(z.ownerId);
+              }}
+              onMouseLeave={() => {
+                if (!isOwner) onPersonalRoomHoverEnd?.();
+              }}
               title={getRoomDisplayName(roomId, z.ownerId)}
-              className={
-                isHouse
-                  ? [
-                      "absolute overflow-visible rounded-xl transition-all duration-200",
-                      isActivePersonal
-                        ? "ring-2 ring-plum-500 shadow-[0_0_16px_5px_rgba(147,51,234,0.22)]"
-                        : "hover:ring-2 hover:ring-indigo-400/50 hover:shadow-[0_0_14px_4px_rgba(99,102,241,0.2)]",
-                    ].join(" ")
-                  : [
-                      "absolute overflow-hidden rounded-xl border-2 border-indigo-200 transition hover:brightness-95 hover:ring-2 hover:ring-indigo-300",
-                      isActivePersonal ? "ring-2 ring-plum-500" : "",
-                    ].join(" ")
-              }
+              className={`${zoneButtonClass} z-20`}
               style={{
                 left: z.x,
                 top: z.y,
@@ -876,9 +894,12 @@ export function VirtualWorld({
                     {users.find((u) => u.id === z.ownerId)?.displayName ?? "Friend"}
                   </p>
                   <p className="mt-0.5 text-[9px] text-indigo-500">
-                    {isOwner ? "Your room" : canEnter ? "Enter" : "Request access"}
+                    {isOwner ? "Your room" : canEnter ? "Enter" : "Visit"}
                   </p>
                 </div>
+              )}
+              {!isOwner && (
+                <span className="pointer-events-none absolute right-1 top-1 text-sm">📬</span>
               )}
             </button>
           );
@@ -916,7 +937,7 @@ export function VirtualWorld({
         {/* ── Current user avatar ───────────────────────────────────────────── */}
         {user && (
           <div
-            className="absolute z-10 flex flex-col items-center"
+            className="pointer-events-none absolute z-10 flex flex-col items-center"
             style={{
               left: pos.x,
               top: pos.y,
@@ -931,58 +952,6 @@ export function VirtualWorld({
           </div>
         )}
 
-        {/* ── Personal room access prompt ───────────────────────────────────── */}
-        {personalPromptOwnerId && user && (() => {
-          const access = personalRoomAccess.find(
-            (a) => a.roomId === roomId && a.ownerId === personalPromptOwnerId
-          );
-          const pending = access?.pendingRequests.some((r) => r.userId === user.id);
-          const full = access ? isPersonalRoomFull(access) : false;
-          return (
-            <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/35">
-              <div className="card w-full max-w-sm text-center">
-                <p className="font-semibold text-cozy-900">
-                  {getRoomDisplayName(roomId, personalPromptOwnerId)}&apos;s personal room
-                </p>
-                <p className="mt-1 text-xs text-cozy-500">
-                  @{users.find((u) => u.id === personalPromptOwnerId)?.displayName ?? "Friend"}
-                </p>
-                <p className="mt-2 text-sm text-cozy-600">
-                  {full
-                    ? "This room is full — only the owner and one guest at a time."
-                    : pending
-                      ? "Your request is pending. The owner can allow you in from their panel."
-                      : "Private room — request access to enter and chat 1:1."}
-                </p>
-                <div className="mt-4 flex justify-center gap-2">
-                  <button
-                    type="button"
-                    className="btn-secondary text-sm"
-                    onClick={() => setPersonalPromptOwnerId(null)}
-                  >
-                    Close
-                  </button>
-                  {!pending && !full && (
-                    <button
-                      type="button"
-                      className="btn-primary text-sm"
-                      onClick={() => {
-                        const result = requestPersonalRoomAccess(
-                          roomId,
-                          personalPromptOwnerId
-                        );
-                        if (!result.ok && result.error) alert(result.error);
-                        setPersonalPromptOwnerId(null);
-                      }}
-                    >
-                      Request to enter
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })()}
       </div>
 
       {/* ── Controls ──────────────────────────────────────────────────────────── */}

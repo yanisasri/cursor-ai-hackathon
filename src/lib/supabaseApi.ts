@@ -7,6 +7,7 @@ import type {
   Notification,
   PersonalRoomAccess,
   Poll,
+  MailboxNote,
   RoomInvite,
   RoomMessage,
   RoomNameChangeRequest,
@@ -1379,5 +1380,53 @@ export const supabaseApi = {
       .eq("id", requestId);
     throwIfError(completeError);
     return { applied: true, roomId };
+  },
+
+  async getMailboxNotes(): Promise<MailboxNote[]> {
+    const { data, error } = await supabase
+      .from("personal_room_mailbox_notes")
+      .select(
+        "id,room_id,owner_id,from_user_id,body,paper_color,envelope_color,stickers,read,in_reply_to_id,created_at"
+      )
+      .order("created_at", { ascending: false });
+    throwIfError(error);
+    return (data ?? []).map((n) => ({
+      id: String(n.id),
+      roomId: String(n.room_id),
+      ownerId: String(n.owner_id),
+      fromUserId: String(n.from_user_id),
+      body: String(n.body),
+      paperColor: String(n.paper_color),
+      envelopeColor: String(n.envelope_color),
+      stickers: Array.isArray(n.stickers) ? n.stickers.map(String) : [],
+      read: Boolean(n.read),
+      inReplyToId: n.in_reply_to_id ? String(n.in_reply_to_id) : null,
+      createdAt: String(n.created_at),
+    }));
+  },
+
+  async insertMailboxNote(note: MailboxNote): Promise<void> {
+    const { error } = await supabase.from("personal_room_mailbox_notes").insert({
+      id: note.id,
+      room_id: note.roomId,
+      owner_id: note.ownerId,
+      from_user_id: note.fromUserId,
+      body: note.body,
+      paper_color: note.paperColor,
+      envelope_color: note.envelopeColor,
+      stickers: note.stickers,
+      read: note.read,
+      in_reply_to_id: note.inReplyToId ?? null,
+      created_at: note.createdAt,
+    });
+    throwIfError(error);
+  },
+
+  async markMailboxNoteRead(noteId: string): Promise<void> {
+    const { error } = await supabase
+      .from("personal_room_mailbox_notes")
+      .update({ read: true })
+      .eq("id", noteId);
+    throwIfError(error);
   },
 };

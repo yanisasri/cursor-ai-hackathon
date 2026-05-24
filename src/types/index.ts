@@ -176,6 +176,51 @@ export function isPersonalRoomFull(access: PersonalRoomAccess): boolean {
   return getPersonalRoomGuests(access).length >= PERSONAL_ROOM_MAX_OCCUPANCY - 1;
 }
 
+/** Online or idle counts as "home" for personal room visits */
+export function isUserAtHome(presence: UserPresence): boolean {
+  return presence === "online" || presence === "idle";
+}
+
+export interface MailboxNote {
+  id: string;
+  roomId: string;
+  ownerId: string;
+  fromUserId: string;
+  body: string;
+  paperColor: string;
+  envelopeColor: string;
+  stickers: string[];
+  read: boolean;
+  inReplyToId?: string | null;
+  createdAt: string;
+}
+
+export const MAILBOX_PAPER_COLORS = [
+  { id: "cream", value: "#fffef0", label: "Cream" },
+  { id: "blush", value: "#fce7f3", label: "Blush" },
+  { id: "sky", value: "#dbeafe", label: "Sky" },
+  { id: "mint", value: "#dcfce7", label: "Mint" },
+  { id: "sun", value: "#fef3c7", label: "Sun" },
+] as const;
+
+export const MAILBOX_ENVELOPE_COLORS = [
+  { id: "kraft", value: "#c4a574", label: "Kraft" },
+  { id: "rose", value: "#e879a9", label: "Rose" },
+  { id: "indigo", value: "#6366f1", label: "Indigo" },
+  { id: "forest", value: "#059669", label: "Forest" },
+  { id: "amber", value: "#d97706", label: "Amber" },
+] as const;
+
+export const MAILBOX_STICKERS = ["⭐", "💌", "🌸", "🎀", "✨", "🌈", "🦋", "☀️", "🌙", "💖"] as const;
+
+export const MAILBOX_MAX_WORDS = 100;
+
+export function countMailboxWords(text: string): number {
+  const trimmed = text.trim();
+  if (!trimmed) return 0;
+  return trimmed.split(/\s+/).length;
+}
+
 /** @deprecated use CalendarEvent */
 export interface CalendarSlot {
   id: string;

@@ -3,6 +3,7 @@ import type {
   CalendarEvent,
   CalendarSlot,
   FriendRequest,
+  MailboxNote,
   NicknameRequest,
   Notification,
   PersonalRoomAccess,
@@ -25,6 +26,7 @@ const KEYS = {
   session: "hangout_session",
   calendar: "hangout_calendar",
   decisionOptions: "hangout_decision_options",
+  mailboxNotes: "hangout_mailbox_notes",
 } as const;
 
 function read<T>(key: string, fallback: T): T {
@@ -283,6 +285,38 @@ export async function getPersonalRoomAccess(): Promise<PersonalRoomAccess[]> {
 
 export async function savePersonalRoomAccess(access: PersonalRoomAccess[]): Promise<void> {
   await supabaseApi.savePersonalRoomAccess(access);
+}
+
+export async function getMailboxNotes(): Promise<MailboxNote[]> {
+  try {
+    const notes = await supabaseApi.getMailboxNotes();
+    write(KEYS.mailboxNotes, notes);
+    return notes;
+  } catch {
+    return read<MailboxNote[]>(KEYS.mailboxNotes, []);
+  }
+}
+
+export async function appendMailboxNote(note: MailboxNote): Promise<void> {
+  const all = await getMailboxNotes();
+  const next = [note, ...all];
+  write(KEYS.mailboxNotes, next);
+  try {
+    await supabaseApi.insertMailboxNote(note);
+  } catch {
+    /* saved locally */
+  }
+}
+
+export async function updateMailboxNoteRead(noteId: string): Promise<void> {
+  const all = await getMailboxNotes();
+  const next = all.map((n) => (n.id === noteId ? { ...n, read: true } : n));
+  write(KEYS.mailboxNotes, next);
+  try {
+    await supabaseApi.markMailboxNoteRead(noteId);
+  } catch {
+    /* local only */
+  }
 }
 
 function normalizeDecisionEntry(
