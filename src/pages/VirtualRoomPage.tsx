@@ -10,13 +10,30 @@ import { RoomNicknamesPanel } from "../components/RoomNicknamesPanel";
 import { RoomSettingsPanel } from "../components/RoomSettingsPanel";
 import { SuggestionsPanel } from "../components/SuggestionsPanel";
 import { VirtualWorld } from "../components/VirtualWorld";
+import { VoiceChatPanel } from "../components/VoiceChatPanel";
 import { useApp } from "../context/AppContext";
+import { useVoiceChat } from "../hooks/useVoiceChat";
+import {
+  livingVoiceChannelId,
+  livingVoiceParticipants,
+  personalVoiceChannelId,
+  personalVoiceParticipants,
+} from "../lib/voiceChannels";
 import { SUB_ROOMS, type SubRoomType } from "../types";
 
 export function VirtualRoomPage() {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
-  const { user, rooms, ensureRoomSetup, leaveRoom } = useApp();
+  const {
+    user,
+    users,
+    rooms,
+    personalRoomAccess,
+    ensureRoomSetup,
+    leaveRoom,
+    getRoomDisplayName,
+    canEnterPersonalRoom,
+  } = useApp();
   const [activeSubRoom, setActiveSubRoom] = useState<SubRoomType>("living");
   const [activePersonalOwner, setActivePersonalOwner] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -34,6 +51,75 @@ export function VirtualRoomPage() {
     if (!room) return [];
     return room.memberIds;
   }, [room]);
+
+  const voiceContext = useMemo(() => {
+    if (!room || !user) return null;
+
+    if (activeSubRoom === "living") {
+      return {
+        channelId: livingVoiceChannelId(room.id),
+        allowedParticipantIds: livingVoiceParticipants(displayMemberIds),
+        title: "Living room voice",
+        description: "Open to all room members. Join to talk with everyone in the living room.",
+        unavailableMessage: undefined as string | undefined,
+      };
+    }
+
+    if (activeSubRoom === "personal" && activePersonalOwner) {
+      const canEnter = canEnterPersonalRoom(room.id, activePersonalOwner, user.id);
+      const ownerName =
+        getRoomDisplayName(room.id, activePersonalOwner) ||
+        users.find((u) => u.id === activePersonalOwner)?.displayName ||
+        "Member";
+      return {
+        channelId: personalVoiceChannelId(room.id, activePersonalOwner),
+        allowedParticipantIds: personalVoiceParticipants(
+          room.id,
+          activePersonalOwner,
+          personalRoomAccess
+        ),
+        title: `${ownerName}'s personal room voice`,
+        description: "Private voice for the room owner and one approved guest.",
+        unavailableMessage: canEnter
+          ? undefined
+          : "Request access and wait for approval before joining voice in this personal room.",
+      };
+    }
+
+    return null;
+  }, [
+    activePersonalOwner,
+    activeSubRoom,
+    canEnterPersonalRoom,
+    displayMemberIds,
+    getRoomDisplayName,
+    personalRoomAccess,
+    room,
+    user,
+    users,
+  ]);
+
+  const participantNames = useMemo(() => {
+    const names: Record<string, string> = {};
+    if (!room) return names;
+    for (const memberId of displayMemberIds) {
+      names[memberId] =
+        getRoomDisplayName(room.id, memberId) ||
+        users.find((u) => u.id === memberId)?.displayName ||
+        "Member";
+    }
+    if (user) {
+      names[user.id] =
+        getRoomDisplayName(room.id, user.id) || user.displayName || "You";
+    }
+    return names;
+  }, [displayMemberIds, getRoomDisplayName, room, user, users]);
+
+  const voice = useVoiceChat({
+    channelId: voiceContext?.unavailableMessage ? null : (voiceContext?.channelId ?? null),
+    userId: user?.id ?? "",
+    allowedParticipantIds: voiceContext?.allowedParticipantIds ?? [],
+  });
 
   if (!user) return <Navigate to="/sign-in" replace />;
 
@@ -80,14 +166,25 @@ export function VirtualRoomPage() {
             memberIds={displayMemberIds}
             selectedOwnerId={activePersonalOwner}
             onSelectOwner={setActivePersonalOwner}
+            voiceContext={voiceContext}
+            voice={voice}
+            participantNames={participantNames}
           />
         );
       default:
-        return (
+        return voiceContext ? (
+          <VoiceChatPanel
+            title={voiceContext.title}
+            description={voiceContext.description}
+            participantNames={participantNames}
+            voice={voice}
+            unavailableMessage={voiceContext.unavailableMessage}
+          />
+        ) : (
           <div className="p-4">
             <h3 className="font-semibold">Living / meeting room</h3>
             <p className="mt-2 text-sm text-cozy-600">
-              Casual voice chat and hangouts. Toggle voice on the map below.
+              Casual voice chat and hangouts. Walk to the living room or use the tab above.
             </p>
           </div>
         );
@@ -162,6 +259,15 @@ export function VirtualRoomPage() {
                 setPanelOpen(true);
                 setSettingsOpen(false);
               }}
+              voiceContext={
+                voiceContext && !voiceContext.unavailableMessage
+                  ? {
+                      title: voiceContext.title,
+                      participantNames,
+                      voice,
+                    }
+                  : null
+              }
             />
             <div className="mt-4">
               <ChatPanel roomId={room.id} />
