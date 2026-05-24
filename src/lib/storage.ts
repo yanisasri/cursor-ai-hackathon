@@ -1,4 +1,5 @@
 import type {
+  AvatarConfig,
   CalendarConnection,
   CalendarEvent,
   CalendarSlot,
@@ -12,7 +13,7 @@ import type {
   User,
   VirtualRoom,
 } from "../types";
-import { ARCHIVE_DAYS, DEFAULT_AVATAR, type AvatarConfig } from "../types";
+import { ARCHIVE_DAYS, DEFAULT_AVATAR } from "../types";
 
 /** Migrate legacy avatar fields (pre-Lorelei) into the new shape. */
 function migrateAvatar(raw: Partial<AvatarConfig> & Record<string, unknown>): AvatarConfig {
@@ -236,134 +237,221 @@ export function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-/** Stable demo friend IDs so they persist across sessions */
+/** Stable demo friend IDs so they persist across sessions (7 friends + you = 8 max) */
 export const DEMO_FRIEND_IDS = {
   alex: "demo-friend-alex",
   sam: "demo-friend-sam",
   jordan: "demo-friend-jordan",
+  casey: "demo-friend-casey",
+  morgan: "demo-friend-morgan",
+  riley: "demo-friend-riley",
+  taylor: "demo-friend-taylor",
 } as const;
 
-export function linkExistingDemoFriends(currentUserId: string): void {
-  const users = read<User[]>(KEYS.users, []);
-  const demos = users.filter((u) => u.email.endsWith("@demo.com"));
-  if (demos.length === 0) return;
+const ALL_DEMO_IDS = Object.values(DEMO_FRIEND_IDS);
+
+type DemoProfile = {
+  id: string;
+  email: string;
+  displayName: string;
+  avatar: AvatarConfig;
+};
+
+const DEMO_PROFILES: DemoProfile[] = [
+  {
+    id: DEMO_FRIEND_IDS.alex,
+    email: "alex@demo.com",
+    displayName: "Alex",
+    avatar: {
+      seed: "demo-alex",
+      skinTone: "#e8c4a8",
+      hairColor: "#2c1810",
+      eyesColor: "#000000",
+      mouthColor: "#000000",
+      hairIndex: 4,
+      eyesIndex: 3,
+      eyebrowsIndex: 2,
+      mouthIndex: 1,
+      glassesIndex: 0,
+      earringsIndex: 0,
+      freckles: false,
+    },
+  },
+  {
+    id: DEMO_FRIEND_IDS.sam,
+    email: "sam@demo.com",
+    displayName: "Sam",
+    avatar: {
+      seed: "demo-sam",
+      skinTone: "#d4a574",
+      hairColor: "#8b5a2b",
+      eyesColor: "#000000",
+      mouthColor: "#000000",
+      hairIndex: 22,
+      eyesIndex: 5,
+      eyebrowsIndex: 4,
+      mouthIndex: 2,
+      glassesIndex: 2,
+      earringsIndex: 1,
+      freckles: true,
+    },
+  },
+  {
+    id: DEMO_FRIEND_IDS.jordan,
+    email: "jordan@demo.com",
+    displayName: "Jordan",
+    avatar: {
+      seed: "demo-jordan",
+      skinTone: "#c68642",
+      hairColor: "#1a1a2e",
+      eyesColor: "#000000",
+      mouthColor: "#000000",
+      hairIndex: 38,
+      eyesIndex: 8,
+      eyebrowsIndex: 6,
+      mouthIndex: 4,
+      glassesIndex: 0,
+      earringsIndex: 2,
+      freckles: false,
+    },
+  },
+  {
+    id: DEMO_FRIEND_IDS.casey,
+    email: "casey@demo.com",
+    displayName: "Casey",
+    avatar: {
+      seed: "demo-casey",
+      skinTone: "#f5d0b5",
+      hairColor: "#5c4033",
+      eyesColor: "#000000",
+      mouthColor: "#000000",
+      hairIndex: 14,
+      eyesIndex: 2,
+      eyebrowsIndex: 1,
+      mouthIndex: 0,
+      glassesIndex: 0,
+      earringsIndex: 0,
+      freckles: false,
+    },
+  },
+  {
+    id: DEMO_FRIEND_IDS.morgan,
+    email: "morgan@demo.com",
+    displayName: "Morgan",
+    avatar: {
+      seed: "demo-morgan",
+      skinTone: "#d4a574",
+      hairColor: "#6a040f",
+      eyesColor: "#000000",
+      mouthColor: "#000000",
+      hairIndex: 28,
+      eyesIndex: 6,
+      eyebrowsIndex: 3,
+      mouthIndex: 1,
+      glassesIndex: 1,
+      earringsIndex: 0,
+      freckles: false,
+    },
+  },
+  {
+    id: DEMO_FRIEND_IDS.riley,
+    email: "riley@demo.com",
+    displayName: "Riley",
+    avatar: {
+      seed: "demo-riley",
+      skinTone: "#e8c4a8",
+      hairColor: "#3d005b",
+      eyesColor: "#000000",
+      mouthColor: "#000000",
+      hairIndex: 8,
+      eyesIndex: 4,
+      eyebrowsIndex: 2,
+      mouthIndex: 3,
+      glassesIndex: 0,
+      earringsIndex: 1,
+      freckles: true,
+    },
+  },
+  {
+    id: DEMO_FRIEND_IDS.taylor,
+    email: "taylor@demo.com",
+    displayName: "Taylor",
+    avatar: {
+      seed: "demo-taylor",
+      skinTone: "#c68642",
+      hairColor: "#4a3728",
+      eyesColor: "#000000",
+      mouthColor: "#000000",
+      hairIndex: 32,
+      eyesIndex: 7,
+      eyebrowsIndex: 5,
+      mouthIndex: 2,
+      glassesIndex: 0,
+      earringsIndex: 0,
+      freckles: false,
+    },
+  },
+];
+
+function buildDemoUser(profile: DemoProfile, currentUserId: string): User {
+  return {
+    id: profile.id,
+    email: profile.email,
+    password: "demo123",
+    displayName: profile.displayName,
+    avatar: profile.avatar,
+    friendIds: [
+      currentUserId,
+      ...ALL_DEMO_IDS.filter((id) => id !== profile.id),
+    ],
+    online: true,
+    avatarCustomized: true,
+  };
+}
+
+/** Create any missing demo users and link them to the current user */
+export function ensureDemoFriends(currentUserId: string): void {
+  let users = getUsers();
   const current = users.find((u) => u.id === currentUserId);
   if (!current) return;
-  const demoIds = demos.map((d) => d.id);
-  const needsUpdate = demoIds.some((id) => !current.friendIds.includes(id));
-  if (!needsUpdate) return;
-  const updatedCurrent: User = {
-    ...current,
-    friendIds: [...new Set([...current.friendIds, ...demoIds])],
-  };
-  saveUsers(
-    users.map((u) => (u.id === currentUserId ? updatedCurrent : u))
-  );
+
+  for (const profile of DEMO_PROFILES) {
+    if (!users.some((u) => u.id === profile.id)) {
+      users = [...users, buildDemoUser(profile, currentUserId)];
+    }
+  }
+
+  users = users.map((u) => {
+    if (u.id === currentUserId) {
+      return {
+        ...u,
+        friendIds: [...new Set([...u.friendIds, ...ALL_DEMO_IDS])],
+      };
+    }
+    if (ALL_DEMO_IDS.includes(u.id as (typeof ALL_DEMO_IDS)[number])) {
+      return {
+        ...u,
+        friendIds: [
+          ...new Set([
+            ...u.friendIds,
+            currentUserId,
+            ...ALL_DEMO_IDS.filter((id) => id !== u.id),
+          ]),
+        ],
+      };
+    }
+    return u;
+  });
+
+  saveUsers(users);
+}
+
+export function linkExistingDemoFriends(currentUserId: string): void {
+  ensureDemoFriends(currentUserId);
 }
 
 export function seedDemoFriends(currentUserId: string): void {
-  const users = getUsers();
-  if (users.some((u) => u.id === DEMO_FRIEND_IDS.alex)) {
-    linkExistingDemoFriends(currentUserId);
-    return;
-  }
-  if (users.some((u) => u.email === "alex@demo.com")) {
-    linkExistingDemoFriends(currentUserId);
-    return;
-  }
-
-  const demoUsers: User[] = [
-    {
-      id: DEMO_FRIEND_IDS.alex,
-      email: "alex@demo.com",
-      password: "demo123",
-      displayName: "Alex",
-      avatar: {
-        seed: "demo-alex",
-        skinTone: "#e8c4a8",
-        hairColor: "#2c1810",
-        eyesColor: "#000000",
-        mouthColor: "#000000",
-        hairIndex: 4,
-        eyesIndex: 3,
-        eyebrowsIndex: 2,
-        mouthIndex: 1,
-        glassesIndex: 0,
-        earringsIndex: 0,
-        freckles: false,
-      },
-      friendIds: [currentUserId, DEMO_FRIEND_IDS.sam, DEMO_FRIEND_IDS.jordan],
-      online: true,
-      avatarCustomized: true,
-    },
-    {
-      id: DEMO_FRIEND_IDS.sam,
-      email: "sam@demo.com",
-      password: "demo123",
-      displayName: "Sam",
-      avatar: {
-        seed: "demo-sam",
-        skinTone: "#d4a574",
-        hairColor: "#8b5a2b",
-        eyesColor: "#000000",
-        mouthColor: "#000000",
-        hairIndex: 22,
-        eyesIndex: 5,
-        eyebrowsIndex: 4,
-        mouthIndex: 2,
-        glassesIndex: 2,
-        earringsIndex: 1,
-        freckles: true,
-      },
-      friendIds: [currentUserId, DEMO_FRIEND_IDS.alex, DEMO_FRIEND_IDS.jordan],
-      online: true,
-      avatarCustomized: true,
-    },
-    {
-      id: DEMO_FRIEND_IDS.jordan,
-      email: "jordan@demo.com",
-      password: "demo123",
-      displayName: "Jordan",
-      avatar: {
-        seed: "demo-jordan",
-        skinTone: "#c68642",
-        hairColor: "#1a1a2e",
-        eyesColor: "#000000",
-        mouthColor: "#000000",
-        hairIndex: 38,
-        eyesIndex: 8,
-        eyebrowsIndex: 6,
-        mouthIndex: 4,
-        glassesIndex: 0,
-        earringsIndex: 2,
-        freckles: false,
-      },
-      friendIds: [currentUserId, DEMO_FRIEND_IDS.alex, DEMO_FRIEND_IDS.sam],
-      online: true,
-      avatarCustomized: true,
-    },
-  ];
-
-  const current = users.find((u) => u.id === currentUserId);
-  if (!current) return;
-
-  const updatedCurrent: User = {
-    ...current,
-    friendIds: [
-      ...new Set([
-        ...current.friendIds,
-        DEMO_FRIEND_IDS.alex,
-        DEMO_FRIEND_IDS.sam,
-        DEMO_FRIEND_IDS.jordan,
-      ]),
-    ],
-  };
-
-  saveUsers([
-    ...users.filter((u) => u.id !== currentUserId),
-    updatedCurrent,
-    ...demoUsers,
-  ]);
+  ensureDemoFriends(currentUserId);
 }
 
 export function ensurePersonalRoomsForRoom(room: VirtualRoom): PersonalRoomAccess[] {

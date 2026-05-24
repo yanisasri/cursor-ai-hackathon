@@ -101,6 +101,17 @@ export interface PersonalRoomAccess {
   pendingRequests: { userId: string; requestedAt: string }[];
 }
 
+/** Owner + one guest max inside a personal room */
+export const PERSONAL_ROOM_MAX_OCCUPANCY = 2;
+
+export function getPersonalRoomGuests(access: PersonalRoomAccess): string[] {
+  return access.grantedIds.filter((id) => id !== access.ownerId);
+}
+
+export function isPersonalRoomFull(access: PersonalRoomAccess): boolean {
+  return getPersonalRoomGuests(access).length >= PERSONAL_ROOM_MAX_OCCUPANCY - 1;
+}
+
 /** @deprecated use CalendarEvent */
 export interface CalendarSlot {
   id: string;
