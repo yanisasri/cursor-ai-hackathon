@@ -89,7 +89,6 @@ export const supabaseApi = {
     throwIfError(usersError);
     throwIfError(avatarsError);
     throwIfError(friendshipsError);
-
     const avatarMap = new Map(
       (avatars ?? []).map((a) => [
         String(a.user_id),
@@ -169,7 +168,6 @@ export const supabaseApi = {
       skin_tone: u.avatar.skinTone,
       avatar_customized: Boolean(u.avatarCustomized),
     }));
-
     const pairSet = new Set<string>();
     const friendshipRows: Array<{
       user_id: string;
