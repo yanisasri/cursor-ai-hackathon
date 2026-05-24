@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppProvider } from "./context/AppContext";
+import { AccountSettings } from "./pages/AccountSettings";
 import { AvatarSetup } from "./pages/AvatarSetup";
 import { CreateRoom } from "./pages/CreateRoom";
 import { EditAvatar } from "./pages/EditAvatar";
@@ -21,6 +22,7 @@ function App() {
           <Route path="/home" element={<Home />} />
           <Route path="/create-room" element={<CreateRoom />} />
           <Route path="/edit-avatar" element={<EditAvatar />} />
+          <Route path="/account" element={<AccountSettings />} />
           <Route path="/room/:roomId" element={<VirtualRoomPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

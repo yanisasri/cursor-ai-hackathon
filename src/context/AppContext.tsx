@@ -24,8 +24,11 @@ import {
   getSessionUserId,
   getSuggestions,
   getSuggestionCategoriesByRoom,
+  deleteAccount as deleteAccountFromDb,
   getUsers,
   linkExistingDemoFriends,
+  leaveRoom as leaveRoomRecord,
+  removeFriendship,
   saveCalendarConnections,
   saveCalendarEvents,
   saveCalendarSlots,
@@ -83,6 +86,9 @@ interface AppContextValue {
   signOut: () => void;
   updateAvatar: (avatar: AvatarConfig) => void;
   addFriendByEmail: (email: string) => Promise<{ ok: boolean; error?: string }>;
+  removeFriend: (friendId: string) => Promise<{ ok: boolean; error?: string }>;
+  deleteAccount: () => Promise<{ ok: boolean; error?: string }>;
+  leaveRoom: (roomId: string) => Promise<{ ok: boolean; error?: string }>;
   createRoom: (data: {
     name: string;
     area: RoomArea;
@@ -299,6 +305,57 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return { ok: true };
     },
     [user, users, loadAll]
+  );
+
+  const removeFriend = useCallback(
+    async (friendId: string) => {
+      if (!user) return { ok: false, error: "Not signed in." };
+      if (friendId === user.id) return { ok: false, error: "Invalid friend." };
+      if (!user.friendIds.includes(friendId)) {
+        return { ok: false, error: "You are not friends with this user." };
+      }
+      try {
+        await removeFriendship(user.id, friendId);
+        await loadAll();
+        return { ok: true };
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Could not remove friend.";
+        return { ok: false, error: message };
+      }
+    },
+    [user, loadAll]
+  );
+
+  const deleteAccount = useCallback(async () => {
+    if (!user) return { ok: false, error: "Not signed in." };
+    try {
+      await setUserOnline(user.id, false);
+      await deleteAccountFromDb(user.id);
+      setSessionUserId(null);
+      setUser(null);
+      return { ok: true };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not delete account.";
+      return { ok: false, error: message };
+    }
+  }, [user]);
+
+  const leaveRoom = useCallback(
+    async (roomId: string) => {
+      if (!user) return { ok: false, error: "Not signed in." };
+      try {
+        await leaveRoomRecord(roomId, user.id);
+        await loadAll();
+        return { ok: true };
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Could not leave room.";
+        return { ok: false, error: message };
+      }
+    },
+    [user, loadAll]
   );
 
   const setRoomNickname = useCallback(
@@ -801,6 +858,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       signOut,
       updateAvatar,
       addFriendByEmail,
+      removeFriend,
+      deleteAccount,
+      leaveRoom,
       createRoom,
       setRoomNickname,
       requestNicknameForFriend,
@@ -850,6 +910,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       signOut,
       updateAvatar,
       addFriendByEmail,
+      removeFriend,
+      deleteAccount,
+      leaveRoom,
       createRoom,
       setRoomNickname,
       requestNicknameForFriend,

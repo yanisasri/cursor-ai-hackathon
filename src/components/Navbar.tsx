@@ -90,6 +90,16 @@ export function Navbar() {
                   className="btn-secondary mt-3 w-full text-sm"
                   onClick={() => {
                     setMenuOpen(false);
+                    navigate("/account");
+                  }}
+                >
+                  Account settings
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary mt-2 w-full text-sm"
+                  onClick={() => {
+                    setMenuOpen(false);
                     navigate("/edit-avatar");
                   }}
                 >

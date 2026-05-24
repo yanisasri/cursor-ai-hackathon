@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { CalendarPanel } from "../components/CalendarPanel";
 import { ChatPanel } from "../components/ChatPanel";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DecisionRoomPanel } from "../components/decision/DecisionRoomPanel";
 import { Navbar } from "../components/Navbar";
 import { PersonalRoomsPanel } from "../components/PersonalRoomsPanel";
@@ -13,11 +14,14 @@ import { SUB_ROOMS, type SubRoomType } from "../types";
 
 export function VirtualRoomPage() {
   const { roomId } = useParams<{ roomId: string }>();
-  const { user, rooms, ensureRoomSetup } = useApp();
+  const navigate = useNavigate();
+  const { user, rooms, ensureRoomSetup, leaveRoom } = useApp();
   const [activeSubRoom, setActiveSubRoom] = useState<SubRoomType>("living");
   const [activePersonalOwner, setActivePersonalOwner] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  const [leaving, setLeaving] = useState(false);
 
   useEffect(() => {
     if (roomId) ensureRoomSetup(roomId);
@@ -47,6 +51,18 @@ export function VirtualRoomPage() {
   }
 
   const subMeta = SUB_ROOMS.find((s) => s.id === activeSubRoom);
+
+  const willDeleteRoom = room.memberIds.length <= 2;
+
+  const confirmLeaveRoom = async () => {
+    setLeaving(true);
+    const result = await leaveRoom(room.id);
+    setLeaving(false);
+    setLeaveConfirmOpen(false);
+    if (result.ok) {
+      navigate("/home");
+    }
+  };
 
   const renderPanel = () => {
     switch (activeSubRoom) {
@@ -121,6 +137,13 @@ export function VirtualRoomPage() {
             >
               Settings
             </button>
+            <button
+              type="button"
+              onClick={() => setLeaveConfirmOpen(true)}
+              className="rounded-lg border border-red-200 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+            >
+              Leave room
+            </button>
           </div>
         </div>
 
@@ -154,7 +177,18 @@ export function VirtualRoomPage() {
             </button>
             <div className={panelOpen ? "block" : "hidden lg:block"}>
               {settingsOpen ? (
-                <RoomNicknamesPanel roomId={room.id} memberIds={displayMemberIds} />
+                <div className="space-y-4">
+                  <RoomNicknamesPanel roomId={room.id} memberIds={displayMemberIds} />
+                  <div className="border-t border-cozy-100 pt-4">
+                    <button
+                      type="button"
+                      className="w-full rounded-lg border border-red-200 px-3 py-2 text-sm text-red-700 hover:bg-red-50"
+                      onClick={() => setLeaveConfirmOpen(true)}
+                    >
+                      Leave room
+                    </button>
+                  </div>
+                </div>
               ) : (
                 renderPanel()
               )}
@@ -162,6 +196,21 @@ export function VirtualRoomPage() {
           </div>
         </div>
       </main>
+
+      <ConfirmDialog
+        open={leaveConfirmOpen}
+        title="Leave room?"
+        message={
+          willDeleteRoom
+            ? "Are you sure you want to leave this room? The room will be deleted because only one member would remain."
+            : "Are you sure you want to leave this room? You can rejoin if another member invites you."
+        }
+        confirmLabel="Leave room"
+        danger
+        loading={leaving}
+        onConfirm={() => void confirmLeaveRoom()}
+        onCancel={() => !leaving && setLeaveConfirmOpen(false)}
+      />
     </>
   );
 }

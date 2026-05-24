@@ -183,6 +183,74 @@ export const supabaseApi = {
     throwIfError(error);
   },
 
+  async removeFriendship(userId: string, friendId: string): Promise<void> {
+    const [user_id, friend_id] =
+      userId < friendId ? [userId, friendId] : [friendId, userId];
+    const { error } = await supabase
+      .from("friendships")
+      .delete()
+      .eq("user_id", user_id)
+      .eq("friend_id", friend_id)
+      .eq("status", "accepted");
+    throwIfError(error);
+  },
+
+  async deleteAccount(userId: string): Promise<void> {
+    const { data: ownedRooms, error: ownedRoomsError } = await supabase
+      .from("rooms")
+      .select("id")
+      .eq("owner_id", userId);
+    throwIfError(ownedRoomsError);
+    const ownedRoomIds = (ownedRooms ?? []).map((r) => String(r.id));
+
+    const deletes = [
+      supabase.from("friendships").delete().or(`user_id.eq.${userId},friend_id.eq.${userId}`),
+      supabase.from("user_avatars").delete().eq("user_id", userId),
+      supabase.from("room_members").delete().eq("user_id", userId),
+      supabase.from("room_nicknames").delete().eq("user_id", userId),
+      supabase
+        .from("nickname_requests")
+        .delete()
+        .or(`from_user_id.eq.${userId},to_user_id.eq.${userId}`),
+      supabase.from("notifications").delete().eq("user_id", userId),
+      supabase.from("room_messages").delete().eq("user_id", userId),
+      supabase.from("calendar_connections").delete().eq("user_id", userId),
+      supabase.from("calendar_event_rsvps").delete().eq("user_id", userId),
+      supabase.from("calendar_events").delete().eq("creator_user_id", userId),
+      supabase.from("suggestion_likes").delete().eq("user_id", userId),
+      supabase.from("poll_votes").delete().eq("user_id", userId),
+      supabase
+        .from("personal_room_access")
+        .delete()
+        .or(`owner_id.eq.${userId},granted_user_id.eq.${userId}`),
+      supabase
+        .from("personal_room_pending_requests")
+        .delete()
+        .or(`owner_id.eq.${userId},requester_user_id.eq.${userId}`),
+    ];
+
+    for (const query of deletes) {
+      const { error } = await query;
+      throwIfError(error);
+    }
+
+    if (ownedRoomIds.length > 0) {
+      const { error: clearMembersError } = await supabase
+        .from("room_members")
+        .delete()
+        .in("room_id", ownedRoomIds);
+      throwIfError(clearMembersError);
+      const { error: deleteRoomsError } = await supabase
+        .from("rooms")
+        .delete()
+        .in("id", ownedRoomIds);
+      throwIfError(deleteRoomsError);
+    }
+
+    const { error: deleteUserError } = await supabase.from("users").delete().eq("id", userId);
+    throwIfError(deleteUserError);
+  },
+
   async saveUsers(users: User[]): Promise<void> {
     const userRows = users.map((u) => ({
       id: u.id,
@@ -320,6 +388,93 @@ export const supabaseApi = {
         .from("room_members")
         .insert(membershipRows);
       throwIfError(membersError);
+    }
+  },
+
+  async deleteRoom(roomId: string): Promise<void> {
+    const { data: polls, error: pollsError } = await supabase
+      .from("polls")
+      .select("id")
+      .eq("room_id", roomId);
+    throwIfError(pollsError);
+    const pollIds = (polls ?? []).map((p) => String(p.id));
+    if (pollIds.length > 0) {
+      const { error: votesError } = await supabase
+        .from("poll_votes")
+        .delete()
+        .in("poll_id", pollIds);
+      throwIfError(votesError);
+      const { error: optionsError } = await supabase
+        .from("poll_options")
+        .delete()
+        .in("poll_id", pollIds);
+      throwIfError(optionsError);
+      const { error: pollsDeleteError } = await supabase.from("polls").delete().in("id", pollIds);
+      throwIfError(pollsDeleteError);
+    }
+
+    const { data: suggestions, error: suggestionsError } = await supabase
+      .from("suggestions")
+      .select("id")
+      .eq("room_id", roomId);
+    throwIfError(suggestionsError);
+    const suggestionIds = (suggestions ?? []).map((s) => String(s.id));
+    if (suggestionIds.length > 0) {
+      const { error: likesError } = await supabase
+        .from("suggestion_likes")
+        .delete()
+        .in("suggestion_id", suggestionIds);
+      throwIfError(likesError);
+      const { error: suggestionsDeleteError } = await supabase
+        .from("suggestions")
+        .delete()
+        .in("id", suggestionIds);
+      throwIfError(suggestionsDeleteError);
+    }
+
+    const roomScopedDeletes = [
+      supabase.from("room_messages").delete().eq("room_id", roomId),
+      supabase.from("room_nicknames").delete().eq("room_id", roomId),
+      supabase.from("nickname_requests").delete().eq("room_id", roomId),
+      supabase.from("calendar_events").delete().eq("room_id", roomId),
+      supabase.from("personal_room_access").delete().eq("room_id", roomId),
+      supabase.from("personal_room_pending_requests").delete().eq("room_id", roomId),
+      supabase.from("suggestion_categories").delete().eq("room_id", roomId),
+      supabase.from("room_members").delete().eq("room_id", roomId),
+    ];
+    for (const query of roomScopedDeletes) {
+      const { error } = await query;
+      throwIfError(error);
+    }
+
+    const { error: roomDeleteError } = await supabase.from("rooms").delete().eq("id", roomId);
+    throwIfError(roomDeleteError);
+  },
+
+  async leaveRoom(roomId: string, userId: string): Promise<void> {
+    const room = (await this.getRooms()).find((r) => r.id === roomId);
+    if (!room) throw new Error("Room not found.");
+    if (!room.memberIds.includes(userId)) throw new Error("You are not in this room.");
+
+    const nextMemberIds = room.memberIds.filter((id) => id !== userId);
+    if (nextMemberIds.length <= 1) {
+      await this.deleteRoom(roomId);
+      return;
+    }
+
+    const { error: memberError } = await supabase
+      .from("room_members")
+      .delete()
+      .eq("room_id", roomId)
+      .eq("user_id", userId);
+    throwIfError(memberError);
+
+    if (room.ownerId === userId) {
+      const { error: ownerError } = await supabase
+        .from("rooms")
+        .update({ owner_id: nextMemberIds[0] })
+        .eq("id", roomId);
+      throwIfError(ownerError);
     }
   },
 

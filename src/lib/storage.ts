@@ -75,6 +75,14 @@ export async function upsertUserAvatars(users: User[]): Promise<void> {
   await supabaseApi.upsertUserAvatars(users);
 }
 
+export async function removeFriendship(userId: string, friendId: string): Promise<void> {
+  await supabaseApi.removeFriendship(userId, friendId);
+}
+
+export async function deleteAccount(userId: string): Promise<void> {
+  await supabaseApi.deleteAccount(userId);
+}
+
 export async function getRooms(): Promise<VirtualRoom[]> {
   return supabaseApi.getRooms();
 }
@@ -85,6 +93,10 @@ export async function saveRooms(rooms: VirtualRoom[]): Promise<void> {
 
 export async function createRoomRecord(room: VirtualRoom): Promise<void> {
   await supabaseApi.createRoom(room);
+}
+
+export async function leaveRoom(roomId: string, userId: string): Promise<void> {
+  await supabaseApi.leaveRoom(roomId, userId);
 }
 
 export function getCalendarSlots(): CalendarSlot[] {
@@ -380,11 +392,14 @@ export async function ensureDemoFriends(currentUserId: string): Promise<void> {
     }
   }
 
+  const addedIds = added.map((u) => u.id);
+  if (addedIds.length === 0) return;
+
   users = users.map((u) => {
     if (u.id === currentUserId) {
       return {
         ...u,
-        friendIds: [...new Set([...u.friendIds, ...ALL_DEMO_IDS])],
+        friendIds: [...new Set([...u.friendIds, ...addedIds])],
       };
     }
     if (ALL_DEMO_IDS.includes(u.id as (typeof ALL_DEMO_IDS)[number])) {
@@ -394,7 +409,7 @@ export async function ensureDemoFriends(currentUserId: string): Promise<void> {
           ...new Set([
             ...u.friendIds,
             currentUserId,
-            ...ALL_DEMO_IDS.filter((id) => id !== u.id),
+            ...addedIds.filter((id) => id !== u.id),
           ]),
         ],
       };
@@ -403,9 +418,7 @@ export async function ensureDemoFriends(currentUserId: string): Promise<void> {
   });
 
   await saveUsers(users);
-  if (added.length > 0) {
-    await upsertUserAvatars(added);
-  }
+  await upsertUserAvatars(added);
 }
 
 export async function linkExistingDemoFriends(currentUserId: string): Promise<void> {
