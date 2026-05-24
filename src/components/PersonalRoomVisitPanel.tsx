@@ -1,5 +1,10 @@
 import { useApp } from "../context/AppContext";
-import { isPersonalRoomFull, type UserPresence } from "../types";
+import {
+  isApprovedPersonalGuest,
+  isPersonalRoomOccupied,
+  isWaitingForPersonalRoomTurn,
+  type UserPresence,
+} from "../types";
 import { PersonalRoomExternalMailbox } from "./mailbox/PersonalRoomExternalMailbox";
 
 interface Props {
@@ -8,6 +13,7 @@ interface Props {
   onDismiss?: () => void;
   onOpenMailboxCompose?: (ownerId: string) => void;
   onRingDoorbell?: (ownerId: string) => void;
+  onEnterRoom?: (ownerId: string) => void;
 }
 
 export function PersonalRoomVisitPanel({
@@ -16,6 +22,7 @@ export function PersonalRoomVisitPanel({
   onDismiss,
   onOpenMailboxCompose,
   onRingDoorbell,
+  onEnterRoom,
 }: Props) {
   const {
     user,
@@ -24,6 +31,7 @@ export function PersonalRoomVisitPanel({
     getRoomDisplayName,
     requestPersonalRoomAccess,
     canEnterPersonalRoom,
+    enterPersonalRoomAsGuest,
   } = useApp();
 
   if (!user || ownerId === user.id) return null;
@@ -32,7 +40,9 @@ export function PersonalRoomVisitPanel({
     (a) => a.roomId === roomId && a.ownerId === ownerId
   );
   const pending = access?.pendingRequests.some((r) => r.userId === user.id);
-  const full = access ? isPersonalRoomFull(access) : false;
+  const approved = access ? isApprovedPersonalGuest(access, user.id) : false;
+  const waiting = access ? isWaitingForPersonalRoomTurn(access, user.id) : false;
+  const occupied = access ? isPersonalRoomOccupied(access) : false;
   const canEnter = canEnterPersonalRoom(roomId, ownerId, user.id);
 
   const ownerName =
@@ -50,6 +60,12 @@ export function PersonalRoomVisitPanel({
     }
     const result = requestPersonalRoomAccess(roomId, ownerId);
     if (!result.ok && result.error) alert(result.error);
+  };
+
+  const handleEnter = () => {
+    const result = enterPersonalRoomAsGuest(roomId, ownerId);
+    if (result.ok) onEnterRoom?.(ownerId);
+    else if (result.error) alert(result.error);
   };
 
   return (
@@ -71,27 +87,48 @@ export function PersonalRoomVisitPanel({
         </div>
       )}
 
-      {canEnter && !pending && (
-        <p className="text-xs text-cozy-600">
-          You have access to {ownerName}&apos;s room. You can still leave a note in their mailbox.
-        </p>
+      {approved && waiting && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+          You&apos;re approved to visit {ownerName}, but someone else is inside. Wait your turn —
+          you won&apos;t need to ring again once they leave.
+        </div>
       )}
 
-      {full && !canEnter && (
-        <p className="text-xs text-amber-700">
-          {ownerName}&apos;s room is full — ring doorbell is unavailable, but you can still leave a
+      {approved && canEnter && !pending && (
+        <div className="space-y-2">
+          <p className="text-xs text-cozy-600">
+            You&apos;re approved — walk in or tap enter. You can come and go until you go offline or
+            visit someone else&apos;s personal room.
+          </p>
+          <button type="button" className="btn-primary w-full text-xs" onClick={handleEnter}>
+            Enter room
+          </button>
+        </div>
+      )}
+
+      {occupied && !approved && !pending && (
+        <p className="text-xs text-cozy-500">
+          Someone is visiting {ownerName} right now. You can still ring the doorbell or leave a
           note.
         </p>
       )}
 
-      <PersonalRoomExternalMailbox
-        ownerName={ownerName}
-        username={username}
-        presence={presence}
-        canRing={!canEnter && !pending && !full}
-        onLeaveNote={() => onOpenMailboxCompose?.(ownerId)}
-        onRingDoorbell={handleRingDoorbell}
-      />
+      {!approved && !pending && (
+        <PersonalRoomExternalMailbox
+          ownerName={ownerName}
+          username={username}
+          presence={presence}
+          canRing
+          onLeaveNote={() => onOpenMailboxCompose?.(ownerId)}
+          onRingDoorbell={handleRingDoorbell}
+        />
+      )}
+
+      {approved && !canEnter && !waiting && (
+        <p className="text-xs text-cozy-600">
+          You have access to {ownerName}&apos;s room. You can still leave a note in their mailbox.
+        </p>
+      )}
     </div>
   );
 }

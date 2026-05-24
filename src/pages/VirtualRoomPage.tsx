@@ -39,6 +39,9 @@ export function VirtualRoomPage() {
     leaveRoom,
     getRoomDisplayName,
     canEnterPersonalRoom,
+    isApprovedPersonalRoom,
+    enterPersonalRoomAsGuest,
+    leavePersonalRoom,
     refresh,
     refreshPersonalRoomAccess,
     requestPersonalRoomAccess,
@@ -236,6 +239,36 @@ export function VirtualRoomPage() {
     setActivePersonalOwner(user.id);
     setPanelOpen(true);
     setSettingsOpen(false);
+    for (const access of personalRoomAccess) {
+      if (access.roomId === room.id && access.activeGuestId === user.id) {
+        leavePersonalRoom(room.id, access.ownerId);
+      }
+    }
+  };
+
+  const handlePersonalRoomZoneEnter = (ownerId: string) => {
+    setPanelOpen(true);
+    setSettingsOpen(false);
+    if (ownerId === user.id) {
+      openOwnMailbox();
+      return;
+    }
+    if (canEnterPersonalRoom(room.id, ownerId, user.id)) {
+      enterPersonalRoomAsGuest(room.id, ownerId);
+      handlePersonalRoomVisit(ownerId);
+      return;
+    }
+    if (isApprovedPersonalRoom(room.id, ownerId, user.id)) {
+      handlePersonalRoomVisit(ownerId);
+      return;
+    }
+    handlePersonalRoomVisit(ownerId);
+  };
+
+  const handlePersonalRoomZoneLeave = (ownerId: string) => {
+    if (ownerId !== user.id) {
+      leavePersonalRoom(room.id, ownerId);
+    }
   };
 
   const handlePersonalRoomVisit = (ownerId: string) => {
@@ -412,6 +445,8 @@ export function VirtualRoomPage() {
                 setSettingsOpen(false);
               }}
               onPersonalRoomVisit={handlePersonalRoomVisit}
+              onPersonalRoomZoneEnter={handlePersonalRoomZoneEnter}
+              onPersonalRoomZoneLeave={handlePersonalRoomZoneLeave}
               onClearPersonalRoomVisit={handleClearPersonalRoomVisit}
               onOpenOwnMailbox={openOwnMailbox}
               onPersonalRoomHover={handlePersonalRoomHover}
@@ -521,6 +556,11 @@ export function VirtualRoomPage() {
                           setSettingsOpen(false);
                         }}
                         onRingDoorbell={handleRingDoorbell}
+                        onEnterRoom={(ownerId) => {
+                          setActiveSubRoom("personal");
+                          setActivePersonalOwner(ownerId);
+                          visitPinnedRef.current = true;
+                        }}
                       />
                     )}
                   </div>

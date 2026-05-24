@@ -5,7 +5,7 @@ import type { VoiceChatState } from "../hooks/useVoiceChat";
 import { useApp } from "../context/AppContext";
 import { AvatarPreview } from "./AvatarPreview";
 import { VoiceChatPanel } from "./VoiceChatPanel";
-import { DEFAULT_AVATAR, getDisplayAvatar, isPersonalRoomFull, type PersonalRoomAccess, type SubRoomType } from "../types";
+import { DEFAULT_AVATAR, getDisplayAvatar, isPersonalRoomOccupied, isApprovedPersonalGuest, type PersonalRoomAccess, type SubRoomType } from "../types";
 
 interface VoiceContextProps {
   title: string;
@@ -21,6 +21,8 @@ interface Props {
   activePersonalOwner?: string | null;
   onEnterSubRoom: (zone: SubRoomType, ownerId?: string) => void;
   onPersonalRoomVisit?: (ownerId: string) => void;
+  onPersonalRoomZoneEnter?: (ownerId: string) => void;
+  onPersonalRoomZoneLeave?: (ownerId: string) => void;
   onClearPersonalRoomVisit?: () => void;
   onOpenOwnMailbox?: () => void;
   onPersonalRoomHover?: (ownerId: string) => void;
@@ -66,8 +68,9 @@ function getPersonalRoomStatusLabel(
   if (!userId) return "Personal Room";
   if (userId === ownerId) return "Your room";
   if (canEnter) return "Tap to enter";
+  if (access && isApprovedPersonalGuest(access, userId)) return "Approved — wait your turn";
   if (access?.pendingRequests.some((r) => r.userId === userId)) return "Pending…";
-  if (access && isPersonalRoomFull(access)) return "Full";
+  if (access && isPersonalRoomOccupied(access)) return "Guest inside";
   return "Request access";
 }
 
@@ -553,7 +556,8 @@ export function VirtualWorld({
   activeSubRoom,
   activePersonalOwner,
   onEnterSubRoom,
-  onPersonalRoomVisit,
+  onPersonalRoomZoneEnter,
+  onPersonalRoomZoneLeave,
   onClearPersonalRoomVisit,
   onOpenOwnMailbox,
   onPersonalRoomHover,
@@ -681,10 +685,10 @@ export function VirtualWorld({
             const ownerId = String(z.ownerId ?? "");
             if (!ownerId) return;
             onEnterSubRoom("personal", ownerId);
-            if (user) {
-              onPersonalRoomVisit?.(ownerId);
-            } else if (user && ownerId === user.id) {
+            if (user && ownerId === user.id) {
               onOpenOwnMailbox?.();
+            } else if (user) {
+              onPersonalRoomZoneEnter?.(ownerId);
             }
           } else {
             onEnterSubRoom(z.type);
@@ -699,10 +703,24 @@ export function VirtualWorld({
 
     leaveZoneTimerRef.current = window.setTimeout(() => {
       leaveZoneTimerRef.current = null;
+      const prev = lastZoneRef.current;
+      if (prev?.startsWith("personal:")) {
+        const ownerId = prev.slice("personal:".length);
+        if (ownerId) onPersonalRoomZoneLeave?.(ownerId);
+      }
       lastZoneRef.current = null;
       onClearPersonalRoomVisit?.();
     }, 450);
-  }, [pos, onEnterSubRoom, onClearPersonalRoomVisit, onOpenOwnMailbox, onPersonalRoomVisit, personalZones, user]);
+  }, [
+    pos,
+    onEnterSubRoom,
+    onClearPersonalRoomVisit,
+    onOpenOwnMailbox,
+    onPersonalRoomZoneEnter,
+    onPersonalRoomZoneLeave,
+    personalZones,
+    user,
+  ]);
 
   useEffect(
     () => () => {
@@ -891,7 +909,7 @@ export function VirtualWorld({
                 if (isOwner) {
                   onOpenOwnMailbox?.();
                 } else {
-                  onPersonalRoomVisit?.(z.ownerId);
+                  onPersonalRoomZoneEnter?.(z.ownerId);
                 }
               }}
               onMouseEnter={() => {

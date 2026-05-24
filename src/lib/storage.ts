@@ -27,6 +27,7 @@ const KEYS = {
   calendar: "hangout_calendar",
   decisionOptions: "hangout_decision_options",
   mailboxNotes: "hangout_mailbox_notes",
+  personalActiveGuests: "hangout_personal_active_guests",
 } as const;
 
 function read<T>(key: string, fallback: T): T {
@@ -280,7 +281,17 @@ export async function saveNicknameRequests(requests: NicknameRequest[]): Promise
 }
 
 export async function getPersonalRoomAccess(): Promise<PersonalRoomAccess[]> {
-  return supabaseApi.getPersonalRoomAccess();
+  let access: PersonalRoomAccess[];
+  try {
+    access = await supabaseApi.getPersonalRoomAccess();
+  } catch {
+    access = [];
+  }
+  const localActive = read<Record<string, string | null>>(KEYS.personalActiveGuests, {});
+  return access.map((a) => ({
+    ...a,
+    activeGuestId: a.activeGuestId ?? localActive[`${a.roomId}:${a.ownerId}`] ?? null,
+  }));
 }
 
 export async function savePersonalRoomAccess(access: PersonalRoomAccess[]): Promise<void> {
@@ -323,6 +334,7 @@ export async function savePersonalRoomAccess(access: PersonalRoomAccess[]): Prom
     return {
       ...inc,
       grantedIds: [...new Set([inc.ownerId, ...inc.grantedIds])],
+      activeGuestId: inc.activeGuestId ?? lat.activeGuestId ?? null,
       pendingRequests: pendingSubsetRemoval
         ? inc.pendingRequests
         : [...pendingByUser.values()],
@@ -336,6 +348,24 @@ export async function savePersonalRoomAccess(access: PersonalRoomAccess[]): Prom
   }
 
   await supabaseApi.savePersonalRoomAccess(merged);
+}
+
+export async function setPersonalRoomActiveGuest(
+  roomId: string,
+  ownerId: string,
+  guestUserId: string | null
+): Promise<void> {
+  const key = `${roomId}:${ownerId}`;
+  const local = read<Record<string, string | null>>(KEYS.personalActiveGuests, {});
+  if (guestUserId) local[key] = guestUserId;
+  else delete local[key];
+  write(KEYS.personalActiveGuests, local);
+
+  try {
+    await supabaseApi.setPersonalRoomActiveGuest(roomId, ownerId, guestUserId);
+  } catch {
+    /* local fallback already saved */
+  }
 }
 
 export async function addPersonalRoomPendingRequest(
@@ -530,6 +560,7 @@ export async function ensurePersonalRoomsForRoom(room: VirtualRoom): Promise<Per
       roomId: room.id,
       ownerId,
       grantedIds: [ownerId],
+      activeGuestId: null,
       pendingRequests: [],
     })),
   ];

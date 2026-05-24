@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import { playDoorbellSound } from "../lib/doorbellSound";
-import { isPersonalRoomFull } from "../types";
+import { isPersonalRoomOccupied } from "../types";
 
 interface Props {
   roomId: string;
@@ -102,7 +102,7 @@ export function PersonalRoomAccessAlerts({ roomId, onNewDoorbell }: Props) {
   const myAccess = personalRoomAccess.find(
     (a) => a.roomId === roomId && a.ownerId === user.id
   );
-  const full = myAccess ? isPersonalRoomFull(myAccess) : false;
+  const occupied = myAccess ? isPersonalRoomOccupied(myAccess) : false;
 
   const dismissAlert = (key: string) => {
     setAlerts((prev) => prev.filter((a) => a.key !== key));
@@ -114,11 +114,11 @@ export function PersonalRoomAccessAlerts({ roomId, onNewDoorbell }: Props) {
         Someone at your door
       </p>
 
-      {alerts.map((alert) => {
-        const requesterName = displayName(alert.requesterId);
+      {alerts.map((doorbell) => {
+        const requesterName = displayName(doorbell.requesterId);
         return (
           <div
-            key={alert.key}
+            key={doorbell.key}
             className="rounded-xl border border-amber-300 bg-white p-3 shadow-sm"
           >
             <p className="text-sm font-semibold text-cozy-900">{requesterName} is visiting</p>
@@ -128,12 +128,11 @@ export function PersonalRoomAccessAlerts({ roomId, onNewDoorbell }: Props) {
             <div className="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
-                className="rounded-lg bg-plum-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-plum-700 disabled:opacity-50"
-                disabled={full}
+                className="rounded-lg bg-plum-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-plum-700"
                 onClick={() => {
-                  const result = grantPersonalRoomAccess(roomId, user.id, alert.requesterId);
-                  if (result.ok) dismissAlert(alert.key);
-                  else if (result.error) alert(result.error);
+                  const result = grantPersonalRoomAccess(roomId, user.id, doorbell.requesterId);
+                  if (result.ok) dismissAlert(doorbell.key);
+                  else if (result.error) window.alert(result.error);
                 }}
               >
                 Allow in
@@ -142,8 +141,8 @@ export function PersonalRoomAccessAlerts({ roomId, onNewDoorbell }: Props) {
                 type="button"
                 className="rounded-lg border border-cozy-300 bg-white px-3 py-1.5 text-xs font-medium text-cozy-800 hover:bg-cozy-50"
                 onClick={() => {
-                  denyPersonalRoomAccess(roomId, user.id, alert.requesterId);
-                  dismissAlert(alert.key);
+                  denyPersonalRoomAccess(roomId, user.id, doorbell.requesterId);
+                  dismissAlert(doorbell.key);
                 }}
               >
                 Deny
@@ -153,9 +152,10 @@ export function PersonalRoomAccessAlerts({ roomId, onNewDoorbell }: Props) {
         );
       })}
 
-      {full && (
+      {occupied && (
         <p className="text-[11px] text-amber-800">
-          Your room is full — a guest must leave before you can allow someone new in.
+          Someone is currently inside — they can approve you and you&apos;ll enter when they step
+          out.
         </p>
       )}
     </div>

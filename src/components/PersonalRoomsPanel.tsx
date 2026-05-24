@@ -4,8 +4,10 @@ import { playDoorbellSound } from "../lib/doorbellSound";
 import type { VoiceChatState } from "../hooks/useVoiceChat";
 import {
   getPersonalRoomGuests,
-  isPersonalRoomFull,
+  isApprovedPersonalGuest,
+  isPersonalRoomOccupied,
   isUserAtHome,
+  isWaitingForPersonalRoomTurn,
   PERSONAL_ROOM_MAX_OCCUPANCY,
   presenceDotClass,
   presenceLabel,
@@ -55,6 +57,7 @@ export function PersonalRoomsPanel({
     leavePersonalRoom,
     denyPersonalRoomAccess,
     canEnterPersonalRoom,
+    enterPersonalRoomAsGuest,
   } = useApp();
   const [selectedOwnerLocal, setSelectedOwnerLocal] = useState<string | null>(null);
   const selectedOwner = selectedOwnerProp ?? selectedOwnerLocal;
@@ -84,9 +87,12 @@ export function PersonalRoomsPanel({
           const access = roomAccess.find((a) => a.ownerId === memberId);
           const isOwner = user?.id === memberId;
           const canEnter = user && canEnterPersonalRoom(roomId, memberId, user.id);
+          const approved = user && access && isApprovedPersonalGuest(access, user.id);
+          const waiting =
+            user && access && isWaitingForPersonalRoomTurn(access, user.id);
           const pending =
             user && access?.pendingRequests.some((r) => r.userId === user.id);
-          const full = access ? isPersonalRoomFull(access) : false;
+          const occupied = access ? isPersonalRoomOccupied(access) : false;
           const guests = access ? getPersonalRoomGuests(access) : [];
           const guestName =
             guests.length > 0
@@ -114,14 +120,18 @@ export function PersonalRoomsPanel({
                   {isOwner
                     ? "Your room — you always have access"
                     : canEnter
-                      ? "You can enter"
-                      : pending
-                        ? "Request pending"
-                        : full
-                          ? "Room full (owner + guest)"
-                          : memberAtHome
-                            ? "Home — ring doorbell to visit"
-                            : "Away — leave a note in their mailbox"}
+                      ? "Inside or tap to enter"
+                      : waiting
+                        ? "Approved — wait your turn"
+                        : approved
+                          ? "Approved — walk in when free"
+                          : pending
+                            ? "Request pending"
+                            : occupied
+                              ? "Guest inside — ring or wait"
+                              : memberAtHome
+                                ? "Home — ring doorbell to visit"
+                                : "Away — leave a note in their mailbox"}
                 </p>
                 {!isOwner && memberUser && (
                   <p className="mt-1 flex items-center gap-1 text-[10px] text-cozy-500">
@@ -157,8 +167,7 @@ export function PersonalRoomsPanel({
                         <div className="flex gap-1">
                           <button
                             type="button"
-                            className="rounded bg-plum-600 px-2 py-0.5 text-xs text-white disabled:opacity-50"
-                            disabled={full && !guests.includes(req.userId)}
+                            className="rounded bg-plum-600 px-2 py-0.5 text-xs text-white"
                             onClick={() => {
                               const result = grantPersonalRoomAccess(
                                 roomId,
@@ -181,28 +190,46 @@ export function PersonalRoomsPanel({
                       </div>
                     );
                   })}
-                  {full && (
+                  {occupied && (
                     <p className="text-[10px] text-amber-700">
-                      Room is full — guest must leave before allowing someone new.
+                      A guest is inside — new visitors can be approved and will wait their turn.
                     </p>
                   )}
                 </div>
               )}
 
-              {!isOwner && user && selectedOwner !== memberId && (
+              {!isOwner && user && (
                 <div className="mt-3">
                   {canEnter ? (
                     <button
                       type="button"
                       className="btn-primary w-full text-sm"
-                      onClick={() => setSelectedOwner(memberId)}
+                      onClick={() => {
+                        const result = enterPersonalRoomAsGuest(roomId, memberId);
+                        if (result.ok) setSelectedOwner(memberId);
+                        else if (result.error) alert(result.error);
+                      }}
                     >
                       Enter room
                     </button>
+                  ) : waiting ? (
+                    <p className="text-center text-sm text-amber-700">
+                      Approved — someone is inside. Wait your turn.
+                    </p>
                   ) : pending ? (
                     <p className="text-center text-sm text-cozy-500">Request pending…</p>
-                  ) : full ? (
-                    <p className="text-center text-sm text-cozy-500">Room is full</p>
+                  ) : approved ? (
+                    <button
+                      type="button"
+                      className="btn-primary w-full text-sm"
+                      onClick={() => {
+                        const result = enterPersonalRoomAsGuest(roomId, memberId);
+                        if (result.ok) setSelectedOwner(memberId);
+                        else if (result.error) alert(result.error);
+                      }}
+                    >
+                      Enter room
+                    </button>
                   ) : memberAtHome ? (
                     <button
                       type="button"
@@ -264,13 +291,28 @@ export function PersonalRoomsPanel({
             (() => {
               const host = users.find((u) => u.id === selectedOwner);
               if (!host) return null;
+              const access = personalRoomAccess.find(
+                (a) => a.roomId === roomId && a.ownerId === selectedOwner
+              );
               const canEnter = canEnterPersonalRoom(roomId, selectedOwner, user.id);
-              const pending = personalRoomAccess
-                .find((a) => a.roomId === roomId && a.ownerId === selectedOwner)
-                ?.pendingRequests.some((r) => r.userId === user.id);
+              const approved = access && isApprovedPersonalGuest(access, user.id);
+              const waiting = access && isWaitingForPersonalRoomTurn(access, user.id);
+              const pending = access?.pendingRequests.some((r) => r.userId === user.id);
               return (
                 <>
-                  {!canEnter && !pending && (
+                  {waiting && (
+                    <p className="mt-2 text-sm text-amber-700">
+                      You&apos;re approved but someone else is visiting. Wait your turn — no need to
+                      ring again.
+                    </p>
+                  )}
+                  {approved && canEnter && (
+                    <p className="mt-2 text-sm text-cozy-600">
+                      You&apos;re inside (or can re-enter freely until you go offline or visit
+                      another personal room).
+                    </p>
+                  )}
+                  {!canEnter && !pending && !approved && (
                     <div className="mt-3">
                       <PersonalRoomExternalMailbox
                         ownerName={getRoomDisplayName(roomId, selectedOwner)}
@@ -283,9 +325,9 @@ export function PersonalRoomsPanel({
                       />
                     </div>
                   )}
-                  {canEnter && (
+                  {approved && !canEnter && !waiting && (
                     <p className="mt-2 text-sm text-cozy-600">
-                      You have access — private 1:1 voice chat available below.
+                      You have approval — enter when the room is free.
                     </p>
                   )}
                 </>
@@ -311,7 +353,7 @@ export function PersonalRoomsPanel({
               setSelectedOwner(null);
             }}
           >
-            Leave room
+            {selectedOwner === user.id ? "Leave room" : "Step out (keep access)"}
           </button>
         </div>
       )}
