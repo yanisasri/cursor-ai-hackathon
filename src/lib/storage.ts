@@ -15,6 +15,49 @@ import type {
 } from "../types";
 import { ARCHIVE_DAYS, DEFAULT_AVATAR } from "../types";
 
+/** Migrate legacy avatar fields (pre-Lorelei) into the new shape. */
+function migrateAvatar(raw: Partial<AvatarConfig> & Record<string, unknown>): AvatarConfig {
+  if (typeof raw.hairIndex === "number") {
+    const merged = { ...DEFAULT_AVATAR, ...raw };
+    return {
+      ...merged,
+      seed:
+        typeof raw.seed === "string"
+          ? raw.seed
+          : `av-${merged.hairIndex}-${merged.eyesIndex}-${merged.mouthIndex}`,
+    };
+  }
+
+  const legacyHair: Record<string, number> = {
+    short: 4,
+    medium: 14,
+    long: 32,
+    curly: 22,
+    bun: 38,
+    ponytail: 28,
+    bangs: 8,
+  };
+
+  const hairstyle = String(raw.hairstyle ?? "medium");
+  const accessory = String(raw.accessory ?? "none");
+
+  return {
+    seed: `legacy-${legacyHair[hairstyle] ?? DEFAULT_AVATAR.hairIndex}-e${typeof raw.eyesIndex === "number" ? raw.eyesIndex : DEFAULT_AVATAR.eyesIndex}`,
+    skinTone: String(raw.skinTone ?? DEFAULT_AVATAR.skinTone),
+    hairColor: String(raw.hairColor ?? DEFAULT_AVATAR.hairColor),
+    eyesColor: DEFAULT_AVATAR.eyesColor,
+    mouthColor: DEFAULT_AVATAR.mouthColor,
+    hairIndex: legacyHair[hairstyle] ?? DEFAULT_AVATAR.hairIndex,
+    eyesIndex: typeof raw.eyesIndex === "number" ? raw.eyesIndex : DEFAULT_AVATAR.eyesIndex,
+    eyebrowsIndex:
+      typeof raw.eyebrowsIndex === "number" ? raw.eyebrowsIndex : DEFAULT_AVATAR.eyebrowsIndex,
+    mouthIndex: typeof raw.mouthIndex === "number" ? raw.mouthIndex : DEFAULT_AVATAR.mouthIndex,
+    glassesIndex: accessory === "glasses" ? 1 : DEFAULT_AVATAR.glassesIndex,
+    earringsIndex: DEFAULT_AVATAR.earringsIndex,
+    freckles: Boolean(raw.freckles),
+  };
+}
+
 const KEYS = {
   users: "hangout_users",
   session: "hangout_session",
@@ -52,12 +95,7 @@ export function getUsers(): User[] {
 function migrateUsers(users: User[]): User[] {
   return users.map((u) => ({
     ...u,
-    avatar: {
-      ...DEFAULT_AVATAR,
-      ...u.avatar,
-      accessory: u.avatar?.accessory ?? "none",
-      skinTone: u.avatar?.skinTone ?? "#f5d0b5",
-    },
+    avatar: migrateAvatar((u.avatar ?? {}) as Partial<AvatarConfig> & Record<string, unknown>),
   }));
 }
 
@@ -225,15 +263,18 @@ const DEMO_PROFILES: DemoProfile[] = [
     email: "alex@demo.com",
     displayName: "Alex",
     avatar: {
-      hairstyle: "short",
-      hairColor: "#2c1810",
-      shirtStyle: "hoodie",
-      shirtColor: "#e07a5f",
-      bottomStyle: "pants",
-      bottomColor: "#1d3557",
-      shoes: "sneakers",
-      accessory: "headphones",
+      seed: "demo-alex",
       skinTone: "#e8c4a8",
+      hairColor: "#2c1810",
+      eyesColor: "#000000",
+      mouthColor: "#000000",
+      hairIndex: 4,
+      eyesIndex: 3,
+      eyebrowsIndex: 2,
+      mouthIndex: 1,
+      glassesIndex: 0,
+      earringsIndex: 0,
+      freckles: false,
     },
   },
   {
@@ -241,15 +282,18 @@ const DEMO_PROFILES: DemoProfile[] = [
     email: "sam@demo.com",
     displayName: "Sam",
     avatar: {
-      hairstyle: "curly",
-      hairColor: "#8b5a2b",
-      shirtStyle: "sweater",
-      shirtColor: "#81b29a",
-      bottomStyle: "skirt",
-      bottomColor: "#f4a261",
-      shoes: "boots",
-      accessory: "glasses",
+      seed: "demo-sam",
       skinTone: "#d4a574",
+      hairColor: "#8b5a2b",
+      eyesColor: "#000000",
+      mouthColor: "#000000",
+      hairIndex: 22,
+      eyesIndex: 5,
+      eyebrowsIndex: 4,
+      mouthIndex: 2,
+      glassesIndex: 2,
+      earringsIndex: 1,
+      freckles: true,
     },
   },
   {
@@ -257,15 +301,18 @@ const DEMO_PROFILES: DemoProfile[] = [
     email: "jordan@demo.com",
     displayName: "Jordan",
     avatar: {
-      hairstyle: "bun",
-      hairColor: "#1a1a2e",
-      shirtStyle: "jacket",
-      shirtColor: "#9b5de5",
-      bottomStyle: "pants",
-      bottomColor: "#264653",
-      shoes: "sneakers",
-      accessory: "hat",
+      seed: "demo-jordan",
       skinTone: "#c68642",
+      hairColor: "#1a1a2e",
+      eyesColor: "#000000",
+      mouthColor: "#000000",
+      hairIndex: 38,
+      eyesIndex: 8,
+      eyebrowsIndex: 6,
+      mouthIndex: 4,
+      glassesIndex: 0,
+      earringsIndex: 2,
+      freckles: false,
     },
   },
   {
@@ -273,15 +320,18 @@ const DEMO_PROFILES: DemoProfile[] = [
     email: "casey@demo.com",
     displayName: "Casey",
     avatar: {
-      hairstyle: "medium",
-      hairColor: "#5c4033",
-      shirtStyle: "tee",
-      shirtColor: "#457b9d",
-      bottomStyle: "shorts",
-      bottomColor: "#f1faee",
-      shoes: "sandals",
-      accessory: "none",
+      seed: "demo-casey",
       skinTone: "#f5d0b5",
+      hairColor: "#5c4033",
+      eyesColor: "#000000",
+      mouthColor: "#000000",
+      hairIndex: 14,
+      eyesIndex: 2,
+      eyebrowsIndex: 1,
+      mouthIndex: 0,
+      glassesIndex: 0,
+      earringsIndex: 0,
+      freckles: false,
     },
   },
   {
@@ -289,15 +339,18 @@ const DEMO_PROFILES: DemoProfile[] = [
     email: "morgan@demo.com",
     displayName: "Morgan",
     avatar: {
-      hairstyle: "ponytail",
-      hairColor: "#6a040f",
-      shirtStyle: "polo",
-      shirtColor: "#ffb703",
-      bottomStyle: "pants",
-      bottomColor: "#023047",
-      shoes: "loafers",
-      accessory: "glasses",
+      seed: "demo-morgan",
       skinTone: "#d4a574",
+      hairColor: "#6a040f",
+      eyesColor: "#000000",
+      mouthColor: "#000000",
+      hairIndex: 28,
+      eyesIndex: 6,
+      eyebrowsIndex: 3,
+      mouthIndex: 1,
+      glassesIndex: 1,
+      earringsIndex: 0,
+      freckles: false,
     },
   },
   {
@@ -305,15 +358,18 @@ const DEMO_PROFILES: DemoProfile[] = [
     email: "riley@demo.com",
     displayName: "Riley",
     avatar: {
-      hairstyle: "bangs",
-      hairColor: "#3d005b",
-      shirtStyle: "tank",
-      shirtColor: "#06d6a0",
-      bottomStyle: "skirt",
-      bottomColor: "#118ab2",
-      shoes: "heels",
-      accessory: "none",
+      seed: "demo-riley",
       skinTone: "#e8c4a8",
+      hairColor: "#3d005b",
+      eyesColor: "#000000",
+      mouthColor: "#000000",
+      hairIndex: 8,
+      eyesIndex: 4,
+      eyebrowsIndex: 2,
+      mouthIndex: 3,
+      glassesIndex: 0,
+      earringsIndex: 1,
+      freckles: true,
     },
   },
   {
@@ -321,15 +377,18 @@ const DEMO_PROFILES: DemoProfile[] = [
     email: "taylor@demo.com",
     displayName: "Taylor",
     avatar: {
-      hairstyle: "long",
-      hairColor: "#4a3728",
-      shirtStyle: "blazer",
-      shirtColor: "#7209b7",
-      bottomStyle: "dress",
-      bottomColor: "#560bad",
-      shoes: "boots",
-      accessory: "hat",
+      seed: "demo-taylor",
       skinTone: "#c68642",
+      hairColor: "#4a3728",
+      eyesColor: "#000000",
+      mouthColor: "#000000",
+      hairIndex: 32,
+      eyesIndex: 7,
+      eyebrowsIndex: 5,
+      mouthIndex: 2,
+      glassesIndex: 0,
+      earringsIndex: 0,
+      freckles: false,
     },
   },
 ];
