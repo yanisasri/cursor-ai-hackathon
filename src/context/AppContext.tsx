@@ -8,6 +8,8 @@ import {
   type ReactNode,
 } from "react";
 import {
+  createRoomRecord,
+  createUser,
   ensurePersonalRoomsForRoom,
   generateId,
   getCalendarConnections,
@@ -23,6 +25,7 @@ import {
   getSuggestions,
   getSuggestionCategoriesByRoom,
   getUsers,
+  linkExistingDemoFriends,
   saveCalendarConnections,
   saveCalendarEvents,
   saveCalendarSlots,
@@ -31,16 +34,14 @@ import {
   savePersonalRoomAccess,
   savePolls,
   saveRoomNicknames,
-  saveRooms,
   saveSuggestions,
   saveSuggestionCategoriesByRoom,
   saveUsers,
   seedDemoFriends,
-  ensureDemoFriends,
   setSessionUserId,
+  verifyCredentials,
 } from "../lib/storage";
 import {
-  DEFAULT_AVATAR,
   MAX_ROOM_MEMBERS,
   getPersonalRoomGuests,
   isPersonalRoomFull,
@@ -74,18 +75,18 @@ interface AppContextValue {
   roomNicknames: RoomNickname[];
   nicknameRequests: NicknameRequest[];
   personalRoomAccess: PersonalRoomAccess[];
-  signUp: (email: string, password: string) => { ok: boolean; error?: string };
-  signIn: (email: string, password: string) => { ok: boolean; error?: string };
+  signUp: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
+  signIn: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   signOut: () => void;
   updateAvatar: (avatar: AvatarConfig) => void;
-  addFriendByEmail: (email: string) => { ok: boolean; error?: string };
+  addFriendByEmail: (email: string) => Promise<{ ok: boolean; error?: string }>;
   createRoom: (data: {
     name: string;
     area: RoomArea;
     maxMembers: number;
     friendIds: string[];
     myNickname?: string;
-  }) => VirtualRoom;
+  }) => Promise<VirtualRoom>;
   setRoomNickname: (roomId: string, userId: string, nickname: string) => void;
   requestNicknameForFriend: (
     roomId: string,
@@ -94,7 +95,7 @@ interface AppContextValue {
   ) => void;
   respondNicknameRequest: (id: string, accept: boolean) => void;
   getRoomDisplayName: (roomId: string, userId: string) => string;
-  refresh: () => void;
+  refresh: () => Promise<void>;
   addCalendarSlot: (slot: Omit<CalendarSlot, "id">) => void;
   addCalendarEvent: (event: Omit<CalendarEvent, "id">) => void;
   createCalendarEventRequest: (event: Omit<CalendarEvent, "id">) => void;
@@ -149,130 +150,173 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [nicknameRequests, setNicknameRequests] = useState<NicknameRequest[]>([]);
   const [personalRoomAccess, setPersonalRoomAccess] = useState<PersonalRoomAccess[]>([]);
 
-  const loadAll = useCallback(() => {
-    const allUsers = getUsers();
+  const loadAll = useCallback(async () => {
     const sessionId = getSessionUserId();
+    const [
+      allUsers,
+      allRooms,
+      allEvents,
+      allConnections,
+      allPolls,
+      allSuggestions,
+      allCategoryMap,
+      allNotifications,
+      allNicknames,
+      allNicknameRequests,
+      allPersonalAccess,
+    ] = await Promise.all([
+      getUsers(),
+      getRooms(),
+      getCalendarEvents(),
+      getCalendarConnections(),
+      getPolls(),
+      getSuggestions(),
+      getSuggestionCategoriesByRoom(),
+      getNotifications(),
+      getRoomNicknames(),
+      getNicknameRequests(),
+      getPersonalRoomAccess(),
+    ]);
+
     setUsers(allUsers);
-    setRooms(getRooms());
+    setRooms(allRooms);
     setCalendarSlots(getCalendarSlots());
-    setCalendarEvents(getCalendarEvents());
-    setCalendarConnections(getCalendarConnections());
-    setPolls(getPolls());
-    setSuggestions(getSuggestions());
-    setSuggestionCategoriesByRoom(getSuggestionCategoriesByRoom());
-    setNotifications(getNotifications());
-    setRoomNicknames(getRoomNicknames());
-    setNicknameRequests(getNicknameRequests());
-    setPersonalRoomAccess(getPersonalRoomAccess());
+    setCalendarEvents(allEvents);
+    setCalendarConnections(allConnections);
+    setPolls(allPolls);
+    setSuggestions(allSuggestions);
+    setSuggestionCategoriesByRoom(allCategoryMap);
+    setNotifications(allNotifications);
+    setRoomNicknames(allNicknames);
+    setNicknameRequests(allNicknameRequests);
+    setPersonalRoomAccess(allPersonalAccess);
     if (sessionId) {
       const found = allUsers.find((u) => u.id === sessionId) ?? null;
-      if (found) ensureDemoFriends(found.id);
-      setUser(getUsers().find((u) => u.id === sessionId) ?? found);
+      if (found) {
+        try {
+          await linkExistingDemoFriends(found.id);
+        } catch {
+          // Do not block app load if demo-linking fails.
+        }
+      }
+      const latestUsers = await getUsers();
+      setUsers(latestUsers);
+      setUser(latestUsers.find((u) => u.id === sessionId) ?? found);
     } else {
       setUser(null);
     }
   }, []);
 
   useEffect(() => {
-    loadAll();
+    void loadAll();
   }, [loadAll]);
 
-  const signUp = useCallback((email: string, password: string) => {
-    const normalized = email.trim().toLowerCase();
-    if (!normalized || password.length < 6) {
-      return { ok: false, error: "Email required and password must be at least 6 characters." };
+  const signUp = useCallback(async (email: string, password: string) => {
+    try {
+      const result = await createUser(email, password);
+      if (!result.ok) return result;
+      setSessionUserId(result.user.id);
+      try {
+        await seedDemoFriends(result.user.id);
+      } catch {
+        // Demo seeding is optional; account creation should still succeed.
+      }
+      await loadAll();
+      return { ok: true };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Sign up failed. Please try again.";
+      return { ok: false, error: message };
     }
-    const all = getUsers();
-    if (all.some((u) => u.email === normalized)) {
-      return { ok: false, error: "An account with this email already exists." };
-    }
-    const newUser: User = {
-      id: generateId(),
-      email: normalized,
-      password,
-      displayName: normalized.split("@")[0],
-      avatar: { ...DEFAULT_AVATAR },
-      friendIds: [],
-      online: true,
-      avatarCustomized: false,
-    };
-    saveUsers([...all, newUser]);
-    setSessionUserId(newUser.id);
-    seedDemoFriends(newUser.id);
-    loadAll();
-    return { ok: true };
   }, [loadAll]);
 
-  const signIn = useCallback((email: string, password: string) => {
-    const normalized = email.trim().toLowerCase();
-    const found = getUsers().find(
-      (u) => u.email === normalized && u.password === password
-    );
-    if (!found) return { ok: false, error: "Invalid email or password." };
-    saveUsers(getUsers().map((u) => (u.id === found.id ? { ...u, online: true } : u)));
-    setSessionUserId(found.id);
-    loadAll();
-    return { ok: true };
+  const signIn = useCallback(async (email: string, password: string) => {
+    try {
+      const found = await verifyCredentials(email, password);
+      if (!found) return { ok: false, error: "Invalid email or password." };
+
+      // Always update presence from fresh DB state to avoid stale in-memory overwrites.
+      const allUsers = await getUsers();
+      const nextUsers = allUsers.map((u) =>
+        u.id === found.id ? { ...u, online: true } : u
+      );
+      await saveUsers(nextUsers);
+
+      setSessionUserId(found.id);
+
+      // Ensure demo friends are available for the signed-in user.
+      try {
+        await seedDemoFriends(found.id);
+        await linkExistingDemoFriends(found.id);
+      } catch {
+        // Demo data is non-critical; do not block sign-in.
+      }
+
+      await loadAll();
+      return { ok: true };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Sign in failed. Please try again.";
+      return { ok: false, error: message };
+    }
   }, [loadAll]);
 
   const signOut = useCallback(() => {
     if (user) {
-      saveUsers(getUsers().map((u) => (u.id === user.id ? { ...u, online: false } : u)));
+      const nextUsers = users.map((u) => (u.id === user.id ? { ...u, online: false } : u));
+      void saveUsers(nextUsers).then(() => loadAll());
     }
     setSessionUserId(null);
     setUser(null);
-    loadAll();
-  }, [user, loadAll]);
+  }, [user, users, loadAll]);
 
   const updateAvatar = useCallback(
     (avatar: AvatarConfig) => {
       if (!user) return;
-      saveUsers(
-        getUsers().map((u) =>
-          u.id === user.id ? { ...u, avatar, avatarCustomized: true } : u
-        )
+      const nextUsers = users.map((u) =>
+        u.id === user.id ? { ...u, avatar, avatarCustomized: true } : u
       );
-      loadAll();
+      void saveUsers(nextUsers).then(() => loadAll());
     },
-    [user, loadAll]
+    [user, users, loadAll]
   );
 
   const addFriendByEmail = useCallback(
-    (email: string) => {
+    async (email: string) => {
       if (!user) return { ok: false, error: "Not signed in." };
       const normalized = email.trim().toLowerCase();
-      const friend = getUsers().find((u) => u.email === normalized);
+      const friend = users.find((u) => u.email === normalized);
       if (!friend) return { ok: false, error: "No user found with that email." };
       if (friend.id === user.id) return { ok: false, error: "You cannot add yourself." };
       if (user.friendIds.includes(friend.id)) {
         return { ok: false, error: "Already friends." };
       }
-      saveUsers(
-        getUsers().map((u) => {
-          if (u.id === user.id) return { ...u, friendIds: [...u.friendIds, friend.id] };
-          if (u.id === friend.id && !u.friendIds.includes(user.id)) {
-            return { ...u, friendIds: [...u.friendIds, user.id] };
-          }
-          return u;
-        })
-      );
-      loadAll();
+      const nextUsers = users.map((u) => {
+        if (u.id === user.id) return { ...u, friendIds: [...u.friendIds, friend.id] };
+        if (u.id === friend.id && !u.friendIds.includes(user.id)) {
+          return { ...u, friendIds: [...u.friendIds, user.id] };
+        }
+        return u;
+      });
+      await saveUsers(nextUsers);
+      await loadAll();
       return { ok: true };
     },
-    [user, loadAll]
+    [user, users, loadAll]
   );
 
   const setRoomNickname = useCallback(
     (roomId: string, userId: string, nickname: string) => {
       const trimmed = nickname.trim();
       if (!trimmed) return;
-      const all = getRoomNicknames().filter(
+      const all = roomNicknames.filter(
         (n) => !(n.roomId === roomId && n.userId === userId)
       );
-      saveRoomNicknames([...all, { roomId, userId, nickname: trimmed }]);
-      loadAll();
+      void saveRoomNicknames([...all, { roomId, userId, nickname: trimmed }]).then(() =>
+        loadAll()
+      );
     },
-    [loadAll]
+    [roomNicknames, loadAll]
   );
 
   const requestNicknameForFriend = useCallback(
@@ -286,42 +330,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
         suggestedNickname: suggestedNickname.trim(),
         status: "pending",
       };
-      saveNicknameRequests([...getNicknameRequests(), req]);
-      loadAll();
+      void saveNicknameRequests([...nicknameRequests, req]).then(() => loadAll());
     },
-    [user, loadAll]
+    [user, nicknameRequests, loadAll]
   );
 
   const respondNicknameRequest = useCallback(
     (id: string, accept: boolean) => {
-      const reqs = getNicknameRequests();
+      const reqs = nicknameRequests;
       const req = reqs.find((r) => r.id === id);
       if (!req) return;
       const updated = reqs.map((r) =>
         r.id === id ? { ...r, status: accept ? "accepted" as const : "declined" as const } : r
       );
-      saveNicknameRequests(updated);
+      void saveNicknameRequests(updated);
       if (accept) {
         setRoomNickname(req.roomId, req.toUserId, req.suggestedNickname);
       }
-      loadAll();
+      void loadAll();
     },
-    [loadAll, setRoomNickname]
+    [nicknameRequests, loadAll, setRoomNickname]
   );
 
   const getRoomDisplayName = useCallback(
     (roomId: string, userId: string) => {
-      const nick = getRoomNicknames().find(
+      const nick = roomNicknames.find(
         (n) => n.roomId === roomId && n.userId === userId
       );
       if (nick) return nick.nickname;
-      return getUsers().find((u) => u.id === userId)?.displayName ?? "Friend";
+      return users.find((u) => u.id === userId)?.displayName ?? "Friend";
     },
-    []
+    [roomNicknames, users]
   );
 
   const createRoom = useCallback(
-    (data: {
+    async (data: {
       name: string;
       area: RoomArea;
       maxMembers: number;
@@ -343,12 +386,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ownerId: user.id,
         createdAt: new Date().toISOString(),
       };
-      saveRooms([...getRooms(), room]);
+      await createRoomRecord(room);
       if (data.myNickname?.trim()) {
         setRoomNickname(room.id, user.id, data.myNickname.trim());
       }
-      ensurePersonalRoomsForRoom(room);
-      loadAll();
+      try {
+        await ensurePersonalRoomsForRoom(room);
+      } catch {
+        // Personal-room setup should not block entering a newly created room.
+      }
+      await loadAll();
       return room;
     },
     [user, loadAll, setRoomNickname]
@@ -356,27 +403,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const ensureRoomSetup = useCallback(
     (roomId: string) => {
-      const room = getRooms().find((r) => r.id === roomId);
-      if (room) ensurePersonalRoomsForRoom(room);
-      loadAll();
+      const room = rooms.find((r) => r.id === roomId);
+      if (room) void ensurePersonalRoomsForRoom(room).then(() => loadAll());
     },
-    [loadAll]
+    [rooms, loadAll]
   );
 
   const addCalendarSlot = useCallback(
     (slot: Omit<CalendarSlot, "id">) => {
       saveCalendarSlots([...getCalendarSlots(), { ...slot, id: generateId() }]);
-      loadAll();
+      void loadAll();
     },
     [loadAll]
   );
 
   const addCalendarEvent = useCallback(
     (event: Omit<CalendarEvent, "id">) => {
-      saveCalendarEvents([...getCalendarEvents(), { ...event, id: generateId() }]);
-      loadAll();
+      void saveCalendarEvents([...calendarEvents, { ...event, id: generateId() }]).then(() =>
+        loadAll()
+      );
     },
-    [loadAll]
+    [calendarEvents, loadAll]
   );
 
   const createCalendarEventRequest = useCallback(
@@ -389,23 +436,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
         syncedToGoogleUserIds: [],
         syncedToAppleUserIds: [],
       };
-      saveCalendarEvents([...getCalendarEvents(), request]);
-      loadAll();
+      void saveCalendarEvents([...calendarEvents, request]).then(() => loadAll());
     },
-    [loadAll]
+    [calendarEvents, loadAll]
   );
 
   const rsvpCalendarEvent = useCallback(
     (eventId: string, join: boolean) => {
       if (!user) return;
-      const updated: CalendarEvent[] = getCalendarEvents().map((e): CalendarEvent => {
+      const updated: CalendarEvent[] = calendarEvents.map((e): CalendarEvent => {
         if (e.id !== eventId) return e;
         const current = e.rsvpUserIds ?? [];
         const nextRsvps = join
           ? [...new Set([...current, user.id])]
           : current.filter((id) => id !== user.id);
         const isConfirmed = nextRsvps.length > 0;
-        const userConn = getCalendarConnections().find((c) => c.userId === user.id);
+        const userConn = calendarConnections.find((c) => c.userId === user.id);
         return {
           ...e,
           status: isConfirmed ? "confirmed" : "pending",
@@ -420,22 +466,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
               : e.syncedToAppleUserIds ?? [],
         };
       });
-      saveCalendarEvents(updated);
-      loadAll();
+      void saveCalendarEvents(updated).then(() => loadAll());
     },
-    [user, loadAll]
+    [user, calendarEvents, calendarConnections, loadAll]
   );
 
   const connectGoogleCalendar = useCallback(() => {
     if (!user) return;
-    const all = getCalendarConnections();
+    const all = calendarConnections;
     const existing = all.find((c) => c.userId === user.id);
     const next = existing
       ? all.map((c) =>
           c.userId === user.id ? { ...c, googleConnected: true } : c
         )
       : [...all, { userId: user.id, googleConnected: true, appleConnected: false }];
-    saveCalendarConnections(next);
+    void saveCalendarConnections(next);
     const demoEvents: CalendarEvent[] = [
       {
         id: generateId(),
@@ -448,28 +493,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
         source: "google",
       },
     ];
-    saveCalendarEvents([...getCalendarEvents(), ...demoEvents]);
-    loadAll();
-  }, [user, loadAll]);
+    void saveCalendarEvents([...calendarEvents, ...demoEvents]).then(() => loadAll());
+  }, [user, calendarConnections, calendarEvents, loadAll]);
 
   const connectAppleCalendar = useCallback(() => {
     if (!user) return;
-    const all = getCalendarConnections();
+    const all = calendarConnections;
     const existing = all.find((c) => c.userId === user.id);
     const next = existing
       ? all.map((c) =>
           c.userId === user.id ? { ...c, appleConnected: true } : c
         )
       : [...all, { userId: user.id, googleConnected: false, appleConnected: true }];
-    saveCalendarConnections(next);
-    loadAll();
-  }, [user, loadAll]);
+    void saveCalendarConnections(next).then(() => loadAll());
+  }, [user, calendarConnections, loadAll]);
 
   const createPoll = useCallback(
     (roomId: string, question: string, options: string[]) => {
       if (!user) return;
-      savePolls([
-        ...getPolls(),
+      const nextPolls = [
+        ...polls,
         {
           id: generateId(),
           roomId,
@@ -477,29 +520,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
           options: options.map((text) => ({ id: generateId(), text, votes: [] })),
           createdBy: user.id,
         },
-      ]);
-      saveNotifications([
-        ...getNotifications(),
+      ];
+      const nextNotifications = [
+        ...notifications,
         {
           id: generateId(),
           userId: user.id,
-          type: "decision",
+          type: "decision" as const,
           title: "New poll",
           message: question,
           read: false,
           createdAt: new Date().toISOString(),
         },
-      ]);
-      loadAll();
+      ];
+      void Promise.all([savePolls(nextPolls), saveNotifications(nextNotifications)]).then(() =>
+        loadAll()
+      );
     },
-    [user, loadAll]
+    [user, polls, notifications, loadAll]
   );
 
   const votePoll = useCallback(
     (pollId: string, optionId: string) => {
       if (!user) return;
-      savePolls(
-        getPolls().map((p) =>
+      void savePolls(
+        polls.map((p) =>
           p.id !== pollId
             ? p
             : {
@@ -512,10 +557,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 }),
               }
         )
-      );
-      loadAll();
+      ).then(() => loadAll());
     },
-    [user, loadAll]
+    [user, polls, loadAll]
   );
 
   const addSuggestion = useCallback(
@@ -539,65 +583,61 @@ export function AppProvider({ children }: { children: ReactNode }) {
         createdAt: new Date().toISOString(),
         archived: false,
       };
-      saveSuggestions([...getSuggestions(), item]);
-      loadAll();
+      void saveSuggestions([...suggestions, item]).then(() => loadAll());
     },
-    [user, loadAll]
+    [user, suggestions, loadAll]
   );
 
   const addSuggestionCategory = useCallback(
     (roomId: string, categoryName: string) => {
       const normalized = categoryName.trim().toLowerCase();
       if (!normalized) return;
-      const all = getSuggestionCategoriesByRoom();
+      const all = suggestionCategoriesByRoom;
       const existing = all[roomId] ?? [];
       if (existing.includes(normalized)) return;
-      saveSuggestionCategoriesByRoom({
+      void saveSuggestionCategoriesByRoom({
         ...all,
         [roomId]: [...existing, normalized],
-      });
-      loadAll();
+      }).then(() => loadAll());
     },
-    [loadAll]
+    [suggestionCategoriesByRoom, loadAll]
   );
 
   const removeSuggestionCategoryIfEmpty = useCallback(
     (roomId: string, categoryName: string) => {
       const normalized = categoryName.trim().toLowerCase();
       if (!normalized || normalized === "other") return false;
-      const hasAnySuggestions = getSuggestions().some(
+      const hasAnySuggestions = suggestions.some(
         (s) => s.roomId === roomId && s.category.toLowerCase() === normalized
       );
       if (hasAnySuggestions) return false;
-      const all = getSuggestionCategoriesByRoom();
+      const all = suggestionCategoriesByRoom;
       const existing = all[roomId] ?? [];
       if (!existing.includes(normalized)) return false;
-      saveSuggestionCategoriesByRoom({
+      void saveSuggestionCategoriesByRoom({
         ...all,
         [roomId]: existing.filter((c) => c !== normalized),
-      });
-      loadAll();
+      }).then(() => loadAll());
       return true;
     },
-    [loadAll]
+    [suggestions, suggestionCategoriesByRoom, loadAll]
   );
 
   const deleteSuggestion = useCallback(
     (id: string) => {
       if (!user) return;
-      const item = getSuggestions().find((s) => s.id === id);
+      const item = suggestions.find((s) => s.id === id);
       if (!item || item.addedBy !== user.id) return;
-      saveSuggestions(getSuggestions().filter((s) => s.id !== id));
-      loadAll();
+      void saveSuggestions(suggestions.filter((s) => s.id !== id)).then(() => loadAll());
     },
-    [user, loadAll]
+    [user, suggestions, loadAll]
   );
 
   const likeSuggestion = useCallback(
     (id: string) => {
       if (!user) return;
-      saveSuggestions(
-        getSuggestions().map((s) => {
+      void saveSuggestions(
+        suggestions.map((s) => {
           if (s.id !== id) return s;
           const has = s.likes.includes(user.id);
           return {
@@ -605,15 +645,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
             likes: has ? s.likes.filter((l) => l !== user.id) : [...s.likes, user.id],
           };
         })
-      );
-      loadAll();
+      ).then(() => loadAll());
     },
-    [user, loadAll]
+    [user, suggestions, loadAll]
   );
 
   const getWeeklyTopSuggestions = useCallback((roomId: string) => {
     const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    return getSuggestions()
+    return suggestions
       .filter(
         (s) =>
           s.roomId === roomId &&
@@ -622,17 +661,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       )
       .sort((a, b) => b.likes.length - a.likes.length)
       .slice(0, 10);
-  }, []);
+  }, [suggestions]);
 
   const getArchivedSuggestions = useCallback((roomId: string) => {
-    return getSuggestions().filter((s) => s.roomId === roomId && s.archived);
-  }, []);
+    return suggestions.filter((s) => s.roomId === roomId && s.archived);
+  }, [suggestions]);
 
   const pushNotification = useCallback(
     (type: Notification["type"], title: string, message: string) => {
       if (!user) return;
-      saveNotifications([
-        ...getNotifications(),
+      void saveNotifications([
+        ...notifications,
         {
           id: generateId(),
           userId: user.id,
@@ -642,36 +681,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
           read: false,
           createdAt: new Date().toISOString(),
         },
-      ]);
-      loadAll();
+      ]).then(() => loadAll());
     },
-    [user, loadAll]
+    [user, notifications, loadAll]
   );
 
   const markNotificationRead = useCallback(
     (id: string) => {
-      saveNotifications(
-        getNotifications().map((n) => (n.id === id ? { ...n, read: true } : n))
-      );
-      loadAll();
+      void saveNotifications(
+        notifications.map((n) => (n.id === id ? { ...n, read: true } : n))
+      ).then(() => loadAll());
     },
-    [loadAll]
+    [notifications, loadAll]
   );
 
   const toggleOnline = useCallback(
     (online: boolean) => {
       if (!user) return;
-      saveUsers(getUsers().map((u) => (u.id === user.id ? { ...u, online } : u)));
-      loadAll();
+      void saveUsers(users.map((u) => (u.id === user.id ? { ...u, online } : u))).then(() =>
+        loadAll()
+      );
     },
-    [user, loadAll]
+    [user, users, loadAll]
   );
 
   const requestPersonalRoomAccess = useCallback(
     (roomId: string, ownerId: string) => {
       if (!user) return { ok: false, error: "Not signed in." };
       if (user.id === ownerId) return { ok: true };
-      const all = getPersonalRoomAccess();
+      const all = personalRoomAccess;
       const idx = all.findIndex((a) => a.roomId === roomId && a.ownerId === ownerId);
       if (idx < 0) return { ok: false, error: "Room not found." };
       const entry = all[idx];
@@ -690,16 +728,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
           { userId: user.id, requestedAt: new Date().toISOString() },
         ],
       };
-      savePersonalRoomAccess(updated);
-      loadAll();
+      void savePersonalRoomAccess(updated).then(() => loadAll());
       return { ok: true };
     },
-    [user, loadAll]
+    [user, personalRoomAccess, loadAll]
   );
 
   const grantPersonalRoomAccess = useCallback(
     (roomId: string, ownerId: string, grantUserId: string) => {
-      const all = getPersonalRoomAccess();
+      const all = personalRoomAccess;
       const idx = all.findIndex((a) => a.roomId === roomId && a.ownerId === ownerId);
       if (idx < 0) return { ok: false, error: "Room not found." };
       const entry = all[idx];
@@ -713,17 +750,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
         grantedIds: [...new Set([...entry.grantedIds, grantUserId])],
         pendingRequests: entry.pendingRequests.filter((r) => r.userId !== grantUserId),
       };
-      savePersonalRoomAccess(updated);
-      loadAll();
+      void savePersonalRoomAccess(updated).then(() => loadAll());
       return { ok: true };
     },
-    [loadAll]
+    [personalRoomAccess, loadAll]
   );
 
   const leavePersonalRoom = useCallback(
     (roomId: string, ownerId: string) => {
       if (!user || user.id === ownerId) return;
-      const all = getPersonalRoomAccess();
+      const all = personalRoomAccess;
       const idx = all.findIndex((a) => a.roomId === roomId && a.ownerId === ownerId);
       if (idx < 0) return;
       const entry = all[idx];
@@ -733,21 +769,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ...entry,
         grantedIds: entry.grantedIds.filter((id) => id !== user.id),
       };
-      savePersonalRoomAccess(updated);
-      loadAll();
+      void savePersonalRoomAccess(updated).then(() => loadAll());
     },
-    [user, loadAll]
+    [user, personalRoomAccess, loadAll]
   );
 
   const canEnterPersonalRoom = useCallback(
     (roomId: string, ownerId: string, visitorId: string) => {
       if (visitorId === ownerId) return true;
-      const entry = getPersonalRoomAccess().find(
+      const entry = personalRoomAccess.find(
         (a) => a.roomId === roomId && a.ownerId === ownerId
       );
       return entry?.grantedIds.includes(visitorId) ?? false;
     },
-    []
+    [personalRoomAccess]
   );
 
   const value = useMemo(

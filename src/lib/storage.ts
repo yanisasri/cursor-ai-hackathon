@@ -14,65 +14,11 @@ import type {
   VirtualRoom,
 } from "../types";
 import { ARCHIVE_DAYS, DEFAULT_AVATAR } from "../types";
-
-/** Migrate legacy avatar fields (pre-Lorelei) into the new shape. */
-function migrateAvatar(raw: Partial<AvatarConfig> & Record<string, unknown>): AvatarConfig {
-  if (typeof raw.hairIndex === "number") {
-    const merged = { ...DEFAULT_AVATAR, ...raw };
-    return {
-      ...merged,
-      seed:
-        typeof raw.seed === "string"
-          ? raw.seed
-          : `av-${merged.hairIndex}-${merged.eyesIndex}-${merged.mouthIndex}`,
-    };
-  }
-
-  const legacyHair: Record<string, number> = {
-    short: 4,
-    medium: 14,
-    long: 32,
-    curly: 22,
-    bun: 38,
-    ponytail: 28,
-    bangs: 8,
-  };
-
-  const hairstyle = String(raw.hairstyle ?? "medium");
-  const accessory = String(raw.accessory ?? "none");
-
-  return {
-    seed: `legacy-${legacyHair[hairstyle] ?? DEFAULT_AVATAR.hairIndex}-e${typeof raw.eyesIndex === "number" ? raw.eyesIndex : DEFAULT_AVATAR.eyesIndex}`,
-    skinTone: String(raw.skinTone ?? DEFAULT_AVATAR.skinTone),
-    hairColor: String(raw.hairColor ?? DEFAULT_AVATAR.hairColor),
-    eyesColor: DEFAULT_AVATAR.eyesColor,
-    mouthColor: DEFAULT_AVATAR.mouthColor,
-    hairIndex: legacyHair[hairstyle] ?? DEFAULT_AVATAR.hairIndex,
-    eyesIndex: typeof raw.eyesIndex === "number" ? raw.eyesIndex : DEFAULT_AVATAR.eyesIndex,
-    eyebrowsIndex:
-      typeof raw.eyebrowsIndex === "number" ? raw.eyebrowsIndex : DEFAULT_AVATAR.eyebrowsIndex,
-    mouthIndex: typeof raw.mouthIndex === "number" ? raw.mouthIndex : DEFAULT_AVATAR.mouthIndex,
-    glassesIndex: accessory === "glasses" ? 1 : DEFAULT_AVATAR.glassesIndex,
-    earringsIndex: DEFAULT_AVATAR.earringsIndex,
-    freckles: Boolean(raw.freckles),
-  };
-}
+import { supabaseApi } from "./supabaseApi";
 
 const KEYS = {
-  users: "hangout_users",
   session: "hangout_session",
-  rooms: "hangout_rooms",
   calendar: "hangout_calendar",
-  calendarEvents: "hangout_calendar_events",
-  calendarConnections: "hangout_calendar_connections",
-  polls: "hangout_polls",
-  suggestions: "hangout_suggestions",
-  notifications: "hangout_notifications",
-  messages: "hangout_messages",
-  nicknames: "hangout_room_nicknames",
-  nicknameRequests: "hangout_nickname_requests",
-  personalAccess: "hangout_personal_access",
-  suggestionCategories: "hangout_suggestion_categories",
 } as const;
 
 function read<T>(key: string, fallback: T): T {
@@ -88,19 +34,19 @@ function write<T>(key: string, value: T): void {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
-export function getUsers(): User[] {
-  return migrateUsers(read<User[]>(KEYS.users, []));
+async function sha256(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
-function migrateUsers(users: User[]): User[] {
-  return users.map((u) => ({
-    ...u,
-    avatar: migrateAvatar((u.avatar ?? {}) as Partial<AvatarConfig> & Record<string, unknown>),
-  }));
-}
-
-export function saveUsers(users: User[]): void {
-  write(KEYS.users, users);
+export function generateId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
 export function getSessionUserId(): string | null {
@@ -112,12 +58,24 @@ export function setSessionUserId(id: string | null): void {
   else localStorage.removeItem(KEYS.session);
 }
 
-export function getRooms(): VirtualRoom[] {
-  return read<VirtualRoom[]>(KEYS.rooms, []);
+export async function getUsers(): Promise<User[]> {
+  return supabaseApi.getUsers();
 }
 
-export function saveRooms(rooms: VirtualRoom[]): void {
-  write(KEYS.rooms, rooms);
+export async function saveUsers(users: User[]): Promise<void> {
+  await supabaseApi.saveUsers(users);
+}
+
+export async function getRooms(): Promise<VirtualRoom[]> {
+  return supabaseApi.getRooms();
+}
+
+export async function saveRooms(rooms: VirtualRoom[]): Promise<void> {
+  await supabaseApi.saveRooms(rooms);
+}
+
+export async function createRoomRecord(room: VirtualRoom): Promise<void> {
+  await supabaseApi.createRoom(room);
 }
 
 export function getCalendarSlots(): CalendarSlot[] {
@@ -128,48 +86,38 @@ export function saveCalendarSlots(slots: CalendarSlot[]): void {
   write(KEYS.calendar, slots);
 }
 
-export function getCalendarEvents(): CalendarEvent[] {
-  return read<CalendarEvent[]>(KEYS.calendarEvents, []).map((e) => ({
-    ...e,
-    status: e.status ?? "confirmed",
-    rsvpUserIds: e.rsvpUserIds ?? [],
-    syncedToGoogleUserIds: e.syncedToGoogleUserIds ?? [],
-    syncedToAppleUserIds: e.syncedToAppleUserIds ?? [],
-  }));
+export async function getCalendarEvents(): Promise<CalendarEvent[]> {
+  return supabaseApi.getCalendarEvents();
 }
 
-export function saveCalendarEvents(events: CalendarEvent[]): void {
-  write(KEYS.calendarEvents, events);
+export async function saveCalendarEvents(events: CalendarEvent[]): Promise<void> {
+  await supabaseApi.saveCalendarEvents(events);
 }
 
-export function getSuggestionCategoriesByRoom(): Record<string, string[]> {
-  return read<Record<string, string[]>>(KEYS.suggestionCategories, {});
+export async function getSuggestionCategoriesByRoom(): Promise<Record<string, string[]>> {
+  return supabaseApi.getSuggestionCategoriesByRoom();
 }
 
-export function saveSuggestionCategoriesByRoom(
+export async function saveSuggestionCategoriesByRoom(
   categoriesByRoom: Record<string, string[]>
-): void {
-  write(KEYS.suggestionCategories, categoriesByRoom);
+): Promise<void> {
+  await supabaseApi.saveSuggestionCategoriesByRoom(categoriesByRoom);
 }
 
-export function getCalendarConnections(): CalendarConnection[] {
-  return read<CalendarConnection[]>(KEYS.calendarConnections, []);
+export async function getCalendarConnections(): Promise<CalendarConnection[]> {
+  return supabaseApi.getCalendarConnections();
 }
 
-export function saveCalendarConnections(connections: CalendarConnection[]): void {
-  write(KEYS.calendarConnections, connections);
+export async function saveCalendarConnections(connections: CalendarConnection[]): Promise<void> {
+  await supabaseApi.saveCalendarConnections(connections);
 }
 
-export function getPolls(): Poll[] {
-  return read<Poll[]>(KEYS.polls, []);
+export async function getPolls(): Promise<Poll[]> {
+  return supabaseApi.getPolls();
 }
 
-export function savePolls(polls: Poll[]): void {
-  write(KEYS.polls, polls);
-}
-
-export function getSuggestions(): Suggestion[] {
-  return migrateSuggestions(read<Suggestion[]>(KEYS.suggestions, []));
+export async function savePolls(polls: Poll[]): Promise<void> {
+  await supabaseApi.savePolls(polls);
 }
 
 function migrateSuggestions(items: Suggestion[]): Suggestion[] {
@@ -178,8 +126,7 @@ function migrateSuggestions(items: Suggestion[]): Suggestion[] {
   return items.map((s) => {
     const createdAt = s.createdAt ?? now;
     const age = Date.now() - new Date(createdAt).getTime();
-    const shouldArchive =
-      !s.archived && s.likes.length === 0 && age >= archiveMs;
+    const shouldArchive = !s.archived && s.likes.length === 0 && age >= archiveMs;
     return {
       ...s,
       createdAt,
@@ -188,53 +135,52 @@ function migrateSuggestions(items: Suggestion[]): Suggestion[] {
   });
 }
 
-export function saveSuggestions(suggestions: Suggestion[]): void {
-  const migrated = migrateSuggestions(suggestions);
-  write(KEYS.suggestions, migrated);
+export async function getSuggestions(): Promise<Suggestion[]> {
+  return migrateSuggestions(await supabaseApi.getSuggestions());
 }
 
-export function getNotifications(): Notification[] {
-  return read<Notification[]>(KEYS.notifications, []);
+export async function saveSuggestions(suggestions: Suggestion[]): Promise<void> {
+  await supabaseApi.saveSuggestions(migrateSuggestions(suggestions));
 }
 
-export function saveNotifications(notifications: Notification[]): void {
-  write(KEYS.notifications, notifications);
+export async function getNotifications(): Promise<Notification[]> {
+  return supabaseApi.getNotifications();
 }
 
-export function getMessages(): RoomMessage[] {
-  return read<RoomMessage[]>(KEYS.messages, []);
+export async function saveNotifications(notifications: Notification[]): Promise<void> {
+  await supabaseApi.saveNotifications(notifications);
 }
 
-export function saveMessages(messages: RoomMessage[]): void {
-  write(KEYS.messages, messages);
+export async function getMessages(): Promise<RoomMessage[]> {
+  return supabaseApi.getMessages();
 }
 
-export function getRoomNicknames(): RoomNickname[] {
-  return read<RoomNickname[]>(KEYS.nicknames, []);
+export async function saveMessages(messages: RoomMessage[]): Promise<void> {
+  await supabaseApi.saveMessages(messages);
 }
 
-export function saveRoomNicknames(nicknames: RoomNickname[]): void {
-  write(KEYS.nicknames, nicknames);
+export async function getRoomNicknames(): Promise<RoomNickname[]> {
+  return supabaseApi.getRoomNicknames();
 }
 
-export function getNicknameRequests(): NicknameRequest[] {
-  return read<NicknameRequest[]>(KEYS.nicknameRequests, []);
+export async function saveRoomNicknames(nicknames: RoomNickname[]): Promise<void> {
+  await supabaseApi.saveRoomNicknames(nicknames);
 }
 
-export function saveNicknameRequests(requests: NicknameRequest[]): void {
-  write(KEYS.nicknameRequests, requests);
+export async function getNicknameRequests(): Promise<NicknameRequest[]> {
+  return supabaseApi.getNicknameRequests();
 }
 
-export function getPersonalRoomAccess(): PersonalRoomAccess[] {
-  return read<PersonalRoomAccess[]>(KEYS.personalAccess, []);
+export async function saveNicknameRequests(requests: NicknameRequest[]): Promise<void> {
+  await supabaseApi.saveNicknameRequests(requests);
 }
 
-export function savePersonalRoomAccess(access: PersonalRoomAccess[]): void {
-  write(KEYS.personalAccess, access);
+export async function getPersonalRoomAccess(): Promise<PersonalRoomAccess[]> {
+  return supabaseApi.getPersonalRoomAccess();
 }
 
-export function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+export async function savePersonalRoomAccess(access: PersonalRoomAccess[]): Promise<void> {
+  await supabaseApi.savePersonalRoomAccess(access);
 }
 
 /** Stable demo friend IDs so they persist across sessions (7 friends + you = 8 max) */
@@ -393,11 +339,11 @@ const DEMO_PROFILES: DemoProfile[] = [
   },
 ];
 
-function buildDemoUser(profile: DemoProfile, currentUserId: string): User {
+function buildDemoUser(profile: DemoProfile, currentUserId: string, passwordHash: string): User {
   return {
     id: profile.id,
     email: profile.email,
-    password: "demo123",
+    password: passwordHash,
     displayName: profile.displayName,
     avatar: profile.avatar,
     friendIds: [
@@ -410,14 +356,15 @@ function buildDemoUser(profile: DemoProfile, currentUserId: string): User {
 }
 
 /** Create any missing demo users and link them to the current user */
-export function ensureDemoFriends(currentUserId: string): void {
-  let users = getUsers();
+export async function ensureDemoFriends(currentUserId: string): Promise<void> {
+  let users = await getUsers();
   const current = users.find((u) => u.id === currentUserId);
   if (!current) return;
+  const passwordHash = await sha256("demo123");
 
   for (const profile of DEMO_PROFILES) {
     if (!users.some((u) => u.id === profile.id)) {
-      users = [...users, buildDemoUser(profile, currentUserId)];
+      users = [...users, buildDemoUser(profile, currentUserId, passwordHash)];
     }
   }
 
@@ -443,33 +390,78 @@ export function ensureDemoFriends(currentUserId: string): void {
     return u;
   });
 
-  saveUsers(users);
+  await saveUsers(users);
 }
 
-export function linkExistingDemoFriends(currentUserId: string): void {
-  ensureDemoFriends(currentUserId);
+export async function linkExistingDemoFriends(currentUserId: string): Promise<void> {
+  await ensureDemoFriends(currentUserId);
 }
 
-export function seedDemoFriends(currentUserId: string): void {
-  ensureDemoFriends(currentUserId);
+export async function seedDemoFriends(currentUserId: string): Promise<void> {
+  await ensureDemoFriends(currentUserId);
 }
 
-export function ensurePersonalRoomsForRoom(room: VirtualRoom): PersonalRoomAccess[] {
-  const all = getPersonalRoomAccess();
+export async function ensurePersonalRoomsForRoom(room: VirtualRoom): Promise<PersonalRoomAccess[]> {
+  const all = await getPersonalRoomAccess();
   const existing = all.filter((a) => a.roomId === room.id);
-  const missing = room.memberIds.filter(
-    (id) => !existing.some((e) => e.ownerId === id)
-  );
+  const missing = room.memberIds.filter((id) => !existing.some((e) => e.ownerId === id));
   if (missing.length === 0) return all;
-
-  const added: PersonalRoomAccess[] = missing.map((ownerId) => ({
-    roomId: room.id,
-    ownerId,
-    grantedIds: [ownerId],
-    pendingRequests: [],
-  }));
-
-  const next = [...all, ...added];
-  savePersonalRoomAccess(next);
+  const next = [
+    ...all,
+    ...missing.map((ownerId) => ({
+      roomId: room.id,
+      ownerId,
+      grantedIds: [ownerId],
+      pendingRequests: [],
+    })),
+  ];
+  await savePersonalRoomAccess(next);
   return next;
+}
+
+export async function verifyCredentials(email: string, password: string): Promise<User | null> {
+  const hashed = await sha256(password);
+  return supabaseApi.getUserByCredentials(email, hashed);
+}
+
+export async function createUser(
+  email: string,
+  password: string
+): Promise<{ ok: true; user: User } | { ok: false; error: string }> {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized || password.length < 6) {
+    return { ok: false, error: "Email required and password must be at least 6 characters." };
+  }
+  const users = await getUsers();
+  if (users.some((u) => u.email === normalized)) {
+    return { ok: false, error: "An account with this email already exists." };
+  }
+  const passwordHash = await sha256(password);
+  const newUser: User = {
+    id: generateId(),
+    email: normalized,
+    password: passwordHash,
+    displayName: normalized.split("@")[0],
+    avatar: { ...DEFAULT_AVATAR },
+    friendIds: [],
+    online: true,
+    avatarCustomized: false,
+  };
+  try {
+    await supabaseApi.createAccount({
+      id: newUser.id,
+      email: newUser.email,
+      passwordHash,
+      displayName: newUser.displayName,
+      avatar: newUser.avatar,
+      avatarCustomized: newUser.avatarCustomized ?? false,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to create account.";
+    if (message.toLowerCase().includes("duplicate")) {
+      return { ok: false, error: "An account with this email already exists." };
+    }
+    return { ok: false, error: message };
+  }
+  return { ok: true, user: newUser };
 }
