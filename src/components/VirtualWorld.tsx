@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getVelocityFromHeldKeys, useHeldKeys } from "../hooks/useHeldKeys";
+import { useRoomAvatarPresence } from "../hooks/useRoomAvatarPresence";
 import type { VoiceChatState } from "../hooks/useVoiceChat";
 import { useApp } from "../context/AppContext";
 import { AvatarPreview } from "./AvatarPreview";
@@ -22,13 +23,7 @@ interface Props {
   voiceContext?: VoiceContextProps | null;
 }
 
-interface Player {
-  id: string;
-  x: number;
-  y: number;
-  name: string;
-}
-
+const DEFAULT_SPAWN = { x: 500, y: 240 };
 export const WORLD_W = 640;
 export const BASE_WORLD_H = 480;
 const SPEED = 3.5;
@@ -85,8 +80,6 @@ const BASE_ZONES: {
   { type: "decision", x: 440, y: 40, w: 160, h: 120, color: "#fde8e8", label: "Decision Room" },
   { type: "suggestions", x: 40, y: 190, w: 200, h: 105, color: "#fff3cd", label: "Ideas" },
 ];
-
-const DEFAULT_SPAWN = { x: 500, y: 240 };
 
 const areaBg: Record<string, string> = {
   house: "#b87040",
@@ -566,30 +559,29 @@ export function VirtualWorld({
     requestPersonalRoomAccess,
   } = useApp();
   const [pos, setPos] = useState(DEFAULT_SPAWN);
+  const posRef = useRef(DEFAULT_SPAWN);
   const [target, setTarget] = useState<{ x: number; y: number } | null>(null);
   const [personalPromptOwnerId, setPersonalPromptOwnerId] = useState<string | null>(null);
-  const [others, setOthers] = useState<Player[]>([]);
   const heldKeysRef = useHeldKeys(true);
   const lastZoneRef = useRef<string | null>(null);
 
-  const worldH = useMemo(() => getWorldHeight(memberIds.length), [memberIds.length]);
+  const others = useRoomAvatarPresence({
+    roomId,
+    userId: user?.id,
+    posRef,
+    activeSubRoom,
+    activePersonalOwner,
+    inVoice: Boolean(voiceContext?.voice.isActive),
+    getDisplayName: (id) =>
+      getRoomDisplayName(roomId, id) || users.find((u) => u.id === id)?.displayName || "Friend",
+    enabled: Boolean(user && roomId),
+  });
 
   useEffect(() => {
-    const members = memberIds.filter((id) => id !== user?.id);
-    setOthers(
-      members.map((id, i) => {
-        const u = users.find((x) => x.id === id);
-        const slot = CORRIDOR_AVATAR_SLOTS[i % CORRIDOR_AVATAR_SLOTS.length];
-        const jitter = (i % 3) * 4 - 4;
-        return {
-          id,
-          x: slot.x + jitter,
-          y: slot.y + (i >= CORRIDOR_AVATAR_SLOTS.length ? 20 : 0),
-          name: getRoomDisplayName(roomId, id) || u?.displayName || "Friend",
-        };
-      })
-    );
-  }, [memberIds, users, user, roomId, getRoomDisplayName]);
+    posRef.current = pos;
+  }, [pos]);
+
+  const worldH = useMemo(() => getWorldHeight(memberIds.length), [memberIds.length]);
 
   const personalZones = useMemo(() => {
     const count = memberIds.length;
@@ -633,16 +625,22 @@ export function VirtualWorld({
           const dist = Math.hypot(dx, dy);
           if (dist < SPEED * 1.5) {
             setTarget(null);
-            return clamp(target.x, target.y);
+            const next = clamp(target.x, target.y);
+            posRef.current = next;
+            return next;
           }
           x += (dx / dist) * SPEED;
           y += (dy / dist) * SPEED;
-          return clamp(x, y);
+          const next = clamp(x, y);
+          posRef.current = next;
+          return next;
         }
 
         const { dx, dy } = getVelocityFromHeldKeys(heldKeysRef.current, SPEED);
         if (dx !== 0 || dy !== 0) {
-          return clamp(x + dx, y + dy);
+          const next = clamp(x + dx, y + dy);
+          posRef.current = next;
+          return next;
         }
         return p;
       });
@@ -893,14 +891,24 @@ export function VirtualWorld({
           return (
             <div
               key={o.id}
-              className="pointer-events-none absolute z-[5] flex flex-col items-center"
+              className="pointer-events-none absolute z-[5] flex flex-col items-center transition-[left,top] duration-100 ease-linear"
               style={{
                 left: o.x,
                 top: o.y,
                 transform: "translate(-50%, -85%)",
               }}
             >
-              <AvatarPreview avatar={avatar} size="sm" label={o.name} />
+              <div className="relative">
+                <AvatarPreview avatar={avatar} size="sm" label={o.name} />
+                {o.inVoice && (
+                  <span
+                    className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-plum-600 text-[8px] text-white shadow"
+                    title="In voice chat"
+                  >
+                    🎙️
+                  </span>
+                )}
+              </div>
             </div>
           );
         })}

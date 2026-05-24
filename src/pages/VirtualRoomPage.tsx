@@ -33,6 +33,7 @@ export function VirtualRoomPage() {
     leaveRoom,
     getRoomDisplayName,
     canEnterPersonalRoom,
+    refresh,
   } = useApp();
   const [activeSubRoom, setActiveSubRoom] = useState<SubRoomType>("living");
   const [activePersonalOwner, setActivePersonalOwner] = useState<string | null>(null);
@@ -44,6 +45,11 @@ export function VirtualRoomPage() {
   useEffect(() => {
     if (roomId) ensureRoomSetup(roomId);
   }, [roomId, ensureRoomSetup]);
+
+  useEffect(() => {
+    const id = setInterval(() => void refresh(), 3_000);
+    return () => clearInterval(id);
+  }, [refresh]);
 
   const room = rooms.find((r) => r.id === roomId);
 
