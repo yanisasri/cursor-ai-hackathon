@@ -8,7 +8,7 @@ interface Props {
 }
 
 export function ChatPanel({ roomId }: Props) {
-  const { user } = useApp();
+  const { user, getRoomDisplayName } = useApp();
   const [messages, setMessages] = useState<RoomMessage[]>([]);
   const [text, setText] = useState("");
   const [stickToBottom, setStickToBottom] = useState(true);
@@ -70,7 +70,7 @@ export function ChatPanel({ roomId }: Props) {
         {messages.map((m) => (
           <p key={m.id} className="mb-1">
             <span className="font-medium text-plum-700">
-              {m.userId === user?.id ? "You" : "Friend"}:
+              {getRoomDisplayName(roomId, m.userId)}:
             </span>{" "}
             {m.text}
           </p>
