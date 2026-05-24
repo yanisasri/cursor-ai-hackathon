@@ -159,6 +159,33 @@ export interface Suggestion {
   archived?: boolean;
 }
 
+export interface RoomDecisionOptions {
+  roomId: string;
+  title: string;
+  options: string[];
+  updatedBy: string;
+  updatedAt: string;
+}
+
+export function parseDecisionOptionsInput(text: string): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const line of text.split("\n")) {
+    for (const part of line.split(",")) {
+      const trimmed = part.trim();
+      const key = trimmed.toLowerCase();
+      if (!trimmed || seen.has(key)) continue;
+      seen.add(key);
+      result.push(trimmed);
+    }
+  }
+  return result;
+}
+
+export function formatDecisionOptionsForInput(options: string[]): string {
+  return options.join("\n");
+}
+
 export interface SuggestionCategoryOption {
   id: SuggestionCategory;
   label: string;

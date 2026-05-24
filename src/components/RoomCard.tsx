@@ -1,6 +1,9 @@
-import { Link } from "react-router-dom";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { useApp } from "../context/AppContext";
 import type { VirtualRoom, RoomArea } from "../types";
 import { ROOM_AREAS } from "../types";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 function RoomPreviewArt({ area }: { area: RoomArea }) {
   switch (area) {
@@ -75,23 +78,68 @@ interface Props {
 }
 
 export function RoomCard({ room }: Props) {
+  const { leaveRoom } = useApp();
+  const navigate = useNavigate();
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+
   const area = ROOM_AREAS.find((a) => a.id === room.area);
+  const willDeleteRoom = room.memberIds.length <= 2;
+
+  const confirmLeaveRoom = async () => {
+    setLeaving(true);
+    const result = await leaveRoom(room.id);
+    setLeaving(false);
+    setLeaveConfirmOpen(false);
+    if (result.ok) {
+      navigate("/home");
+    }
+  };
+
   return (
-    <Link
-      to={`/room/${room.id}`}
-      className="group block overflow-hidden rounded-2xl border border-cozy-200 bg-white shadow-sm transition hover:border-plum-300 hover:shadow-lg"
-    >
-      <div className="relative h-36 overflow-hidden">
-        <RoomPreviewArt area={room.area} />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
-        <span className="absolute bottom-3 left-3 text-2xl drop-shadow">{area?.emoji}</span>
-        <span className="absolute bottom-3 right-3 rounded-full bg-white/90 px-2 py-0.5 text-xs font-medium text-cozy-800">
-          {room.memberIds.length}/{room.maxMembers}
-        </span>
+    <>
+      <div className="group relative overflow-hidden rounded-2xl border border-cozy-200 bg-white shadow-sm transition hover:border-plum-300 hover:shadow-lg">
+        <Link to={`/room/${room.id}`} className="block">
+          <div className="relative h-36 overflow-hidden">
+            <RoomPreviewArt area={room.area} />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
+            <span className="absolute bottom-3 left-3 text-2xl drop-shadow">{area?.emoji}</span>
+            <span className="absolute bottom-3 right-3 rounded-full bg-white/90 px-2 py-0.5 text-xs font-medium text-cozy-800">
+              {room.memberIds.length}/{room.maxMembers}
+            </span>
+          </div>
+          <div className="p-4">
+            <h3 className="font-semibold text-cozy-900 group-hover:text-plum-700">{room.name}</h3>
+          </div>
+        </Link>
+        <button
+          type="button"
+          title="Leave room"
+          className="absolute right-3 top-3 rounded-lg bg-white/90 px-2 py-1 text-xs text-red-700 opacity-0 shadow transition hover:bg-red-50 group-hover:opacity-100"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setLeaveConfirmOpen(true);
+          }}
+        >
+          Leave
+        </button>
       </div>
-      <div className="p-4">
-        <h3 className="font-semibold text-cozy-900 group-hover:text-plum-700">{room.name}</h3>
-      </div>
-    </Link>
+
+      <ConfirmDialog
+        open={leaveConfirmOpen}
+        title="Leave room?"
+        message={
+          willDeleteRoom
+            ? `Are you sure you want to leave "${room.name}"? The room will be deleted because only one member would remain.`
+            : `Are you sure you want to leave "${room.name}"?`
+        }
+        confirmLabel="Leave room"
+        danger
+        loading={leaving}
+        onConfirm={() => void confirmLeaveRoom()}
+        onCancel={() => !leaving && setLeaveConfirmOpen(false)}
+      />
+    </>
   );
 }

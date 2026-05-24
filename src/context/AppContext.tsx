@@ -15,6 +15,7 @@ import {
   getCalendarConnections,
   getCalendarEvents,
   getCalendarSlots,
+  getDecisionOptionsByRoom,
   getNicknameRequests,
   getNotifications,
   getPersonalRoomAccess,
@@ -24,11 +25,14 @@ import {
   getSessionUserId,
   getSuggestions,
   getSuggestionCategoriesByRoom,
+  deleteAccount as deleteAccountFromDb,
   getUsers,
-  linkExistingDemoFriends,
+  leaveRoom as leaveRoomRecord,
+  removeFriendship,
   saveCalendarConnections,
   saveCalendarEvents,
   saveCalendarSlots,
+  saveDecisionOptions,
   saveNicknameRequests,
   saveNotifications,
   savePersonalRoomAccess,
@@ -37,8 +41,9 @@ import {
   saveSuggestions,
   saveSuggestionCategoriesByRoom,
   saveUsers,
-  seedDemoFriends,
   setSessionUserId,
+  setUserOnline,
+  upsertUserAvatars,
   verifyCredentials,
 } from "../lib/storage";
 import {
@@ -55,6 +60,7 @@ import {
   type PersonalRoomAccess,
   type Poll,
   type RoomArea,
+  type RoomDecisionOptions,
   type RoomNickname,
   type Suggestion,
   type SuggestionCategory,
@@ -72,6 +78,7 @@ interface AppContextValue {
   polls: Poll[];
   suggestions: Suggestion[];
   suggestionCategoriesByRoom: Record<string, string[]>;
+  decisionOptionsByRoom: Record<string, RoomDecisionOptions>;
   notifications: Notification[];
   roomNicknames: RoomNickname[];
   nicknameRequests: NicknameRequest[];
@@ -81,6 +88,9 @@ interface AppContextValue {
   signOut: () => void;
   updateAvatar: (avatar: AvatarConfig) => void;
   addFriendByEmail: (email: string) => Promise<{ ok: boolean; error?: string }>;
+  removeFriend: (friendId: string) => Promise<{ ok: boolean; error?: string }>;
+  deleteAccount: () => Promise<{ ok: boolean; error?: string }>;
+  leaveRoom: (roomId: string) => Promise<{ ok: boolean; error?: string }>;
   createRoom: (data: {
     name: string;
     area: RoomArea;
@@ -103,7 +113,7 @@ interface AppContextValue {
   rsvpCalendarEvent: (eventId: string, join: boolean) => void;
   connectGoogleCalendar: () => void;
   connectAppleCalendar: () => void;
-  createPoll: (roomId: string, question: string, options: string[]) => void;
+  createPoll: (roomId: string, options: string[]) => void;
   votePoll: (pollId: string, optionId: string) => void;
   addSuggestion: (data: {
     roomId: string;
@@ -118,6 +128,13 @@ interface AppContextValue {
   likeSuggestion: (id: string) => void;
   getWeeklyTopSuggestions: (roomId: string) => Suggestion[];
   getArchivedSuggestions: (roomId: string) => Suggestion[];
+  getRoomDecisionOptions: (roomId: string) => string[];
+  getRoomDecisionTitle: (roomId: string) => string;
+  setRoomDecisionOptions: (
+    roomId: string,
+    data: { title: string; options: string[] }
+  ) => Promise<{ ok: boolean; error?: string }>;
+  notifyRoomDecision: (roomId: string, title: string, message: string) => void;
   pushNotification: (
     type: Notification["type"],
     title: string,
@@ -146,6 +163,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [suggestionCategoriesByRoom, setSuggestionCategoriesByRoom] = useState<
     Record<string, string[]>
   >({});
+  const [decisionOptionsByRoom, setDecisionOptionsByRoom] = useState<
+    Record<string, RoomDecisionOptions>
+  >({});
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [roomNicknames, setRoomNicknames] = useState<RoomNickname[]>([]);
   const [nicknameRequests, setNicknameRequests] = useState<NicknameRequest[]>([]);
@@ -161,6 +181,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       allPolls,
       allSuggestions,
       allCategoryMap,
+      allDecisionOptions,
       allNotifications,
       allNicknames,
       allNicknameRequests,
@@ -173,6 +194,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       getPolls(),
       getSuggestions(),
       getSuggestionCategoriesByRoom(),
+      getDecisionOptionsByRoom(),
       getNotifications(),
       getRoomNicknames(),
       getNicknameRequests(),
@@ -187,19 +209,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setPolls(allPolls);
     setSuggestions(allSuggestions);
     setSuggestionCategoriesByRoom(allCategoryMap);
+    setDecisionOptionsByRoom(allDecisionOptions);
     setNotifications(allNotifications);
     setRoomNicknames(allNicknames);
     setNicknameRequests(allNicknameRequests);
     setPersonalRoomAccess(allPersonalAccess);
     if (sessionId) {
       const found = allUsers.find((u) => u.id === sessionId) ?? null;
-      if (found) {
-        try {
-          await linkExistingDemoFriends(found.id);
-        } catch {
-          // Do not block app load if demo-linking fails.
-        }
-      }
       const latestUsers = await getUsers();
       setUsers(latestUsers);
       setUser(latestUsers.find((u) => u.id === sessionId) ?? found);
@@ -217,11 +233,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const result = await createUser(email, password);
       if (!result.ok) return result;
       setSessionUserId(result.user.id);
-      try {
-        await seedDemoFriends(result.user.id);
-      } catch {
-        // Demo seeding is optional; account creation should still succeed.
-      }
       await loadAll();
       return { ok: true };
     } catch (error) {
@@ -236,22 +247,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const found = await verifyCredentials(email, password);
       if (!found) return { ok: false, error: "Invalid email or password." };
 
-      // Always update presence from fresh DB state to avoid stale in-memory overwrites.
-      const allUsers = await getUsers();
-      const nextUsers = allUsers.map((u) =>
-        u.id === found.id ? { ...u, online: true } : u
-      );
-      await saveUsers(nextUsers);
+      await setUserOnline(found.id, true);
 
       setSessionUserId(found.id);
-
-      // Ensure demo friends are available for the signed-in user.
-      try {
-        await seedDemoFriends(found.id);
-        await linkExistingDemoFriends(found.id);
-      } catch {
-        // Demo data is non-critical; do not block sign-in.
-      }
 
       await loadAll();
       return { ok: true };
@@ -264,22 +262,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(() => {
     if (user) {
-      const nextUsers = users.map((u) => (u.id === user.id ? { ...u, online: false } : u));
-      void saveUsers(nextUsers).then(() => loadAll());
+      void setUserOnline(user.id, false).then(() => loadAll());
     }
     setSessionUserId(null);
     setUser(null);
-  }, [user, users, loadAll]);
+  }, [user, loadAll]);
 
   const updateAvatar = useCallback(
     (avatar: AvatarConfig) => {
       if (!user) return;
-      const nextUsers = users.map((u) =>
-        u.id === user.id ? { ...u, avatar, avatarCustomized: true } : u
+      void upsertUserAvatars([{ ...user, avatar, avatarCustomized: true }]).then(() =>
+        loadAll()
       );
-      void saveUsers(nextUsers).then(() => loadAll());
     },
-    [user, users, loadAll]
+    [user, loadAll]
   );
 
   const addFriendByEmail = useCallback(
@@ -304,6 +300,57 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return { ok: true };
     },
     [user, users, loadAll]
+  );
+
+  const removeFriend = useCallback(
+    async (friendId: string) => {
+      if (!user) return { ok: false, error: "Not signed in." };
+      if (friendId === user.id) return { ok: false, error: "Invalid friend." };
+      if (!user.friendIds.includes(friendId)) {
+        return { ok: false, error: "You are not friends with this user." };
+      }
+      try {
+        await removeFriendship(user.id, friendId);
+        await loadAll();
+        return { ok: true };
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Could not remove friend.";
+        return { ok: false, error: message };
+      }
+    },
+    [user, loadAll]
+  );
+
+  const deleteAccount = useCallback(async () => {
+    if (!user) return { ok: false, error: "Not signed in." };
+    try {
+      await setUserOnline(user.id, false);
+      await deleteAccountFromDb(user.id);
+      setSessionUserId(null);
+      setUser(null);
+      return { ok: true };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not delete account.";
+      return { ok: false, error: message };
+    }
+  }, [user]);
+
+  const leaveRoom = useCallback(
+    async (roomId: string) => {
+      if (!user) return { ok: false, error: "Not signed in." };
+      try {
+        await leaveRoomRecord(roomId, user.id);
+        await loadAll();
+        return { ok: true };
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Could not leave room.";
+        return { ok: false, error: message };
+      }
+    },
+    [user, loadAll]
   );
 
   const setRoomNickname = useCallback(
@@ -510,8 +557,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [user, calendarConnections, loadAll]);
 
   const createPoll = useCallback(
-    (roomId: string, question: string, options: string[]) => {
+    (roomId: string, options: string[]) => {
       if (!user) return;
+      const question = decisionOptionsByRoom[roomId]?.title?.trim() ?? "";
+      if (!question) return;
       const nextPolls = [
         ...polls,
         {
@@ -522,28 +571,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
           createdBy: user.id,
         },
       ];
-      const nextNotifications = [
-        ...notifications,
-        {
-          id: generateId(),
-          userId: user.id,
-          type: "decision" as const,
-          title: "New poll",
-          message: question,
-          read: false,
-          createdAt: new Date().toISOString(),
-        },
-      ];
-      void Promise.all([savePolls(nextPolls), saveNotifications(nextNotifications)]).then(() =>
-        loadAll()
+      const actor = users.find((u) => u.id === user.id)?.displayName ?? "Someone";
+      const room = rooms.find((r) => r.id === roomId);
+      const memberIds = room?.memberIds ?? [];
+      const now = new Date().toISOString();
+      const pollNotifications: Notification[] = memberIds.map((memberId) => ({
+        id: generateId(),
+        userId: memberId,
+        type: "decision" as const,
+        title: "Poll started",
+        message: `${actor} started a poll: "${question}"`,
+        read: false,
+        createdAt: now,
+      }));
+      void Promise.all([savePolls(nextPolls), saveNotifications([...notifications, ...pollNotifications])]).then(
+        () => loadAll()
       );
     },
-    [user, polls, notifications, loadAll]
+    [user, users, rooms, polls, notifications, decisionOptionsByRoom, loadAll]
   );
 
   const votePoll = useCallback(
     (pollId: string, optionId: string) => {
       if (!user) return;
+      const poll = polls.find((p) => p.id === pollId);
+      const option = poll?.options.find((o) => o.id === optionId);
+      const actor = users.find((u) => u.id === user.id)?.displayName ?? "Someone";
       void savePolls(
         polls.map((p) =>
           p.id !== pollId
@@ -558,9 +611,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 }),
               }
         )
-      ).then(() => loadAll());
+      ).then(() => {
+        if (poll && option) {
+          const room = rooms.find((r) => r.id === poll.roomId);
+          const memberIds = room?.memberIds ?? [];
+          const now = new Date().toISOString();
+          const voteNotifications: Notification[] = memberIds.map((memberId) => ({
+            id: generateId(),
+            userId: memberId,
+            type: "decision" as const,
+            title: "Poll vote",
+            message: `${actor} voted for "${option.text}" in "${poll.question}"`,
+            read: false,
+            createdAt: now,
+          }));
+          void saveNotifications([...notifications, ...voteNotifications]).then(() => loadAll());
+        } else {
+          void loadAll();
+        }
+      });
     },
-    [user, polls, loadAll]
+    [user, users, rooms, polls, notifications, loadAll]
   );
 
   const addSuggestion = useCallback(
@@ -670,6 +741,62 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return suggestions.filter((s) => s.roomId === roomId && s.archived);
   }, [suggestions]);
 
+  const getRoomDecisionOptions = useCallback(
+    (roomId: string) => decisionOptionsByRoom[roomId]?.options ?? [],
+    [decisionOptionsByRoom]
+  );
+
+  const getRoomDecisionTitle = useCallback(
+    (roomId: string) => decisionOptionsByRoom[roomId]?.title?.trim() ?? "",
+    [decisionOptionsByRoom]
+  );
+
+  const notifyRoomDecision = useCallback(
+    (roomId: string, title: string, message: string) => {
+      const room = rooms.find((r) => r.id === roomId);
+      if (!room) return;
+      const now = new Date().toISOString();
+      const decisionNotifications: Notification[] = room.memberIds.map((memberId) => ({
+        id: generateId(),
+        userId: memberId,
+        type: "decision" as const,
+        title,
+        message,
+        read: false,
+        createdAt: now,
+      }));
+      void saveNotifications([...notifications, ...decisionNotifications]).then(() => loadAll());
+    },
+    [rooms, notifications, loadAll]
+  );
+
+  const setRoomDecisionOptionsHandler = useCallback(
+    async (roomId: string, data: { title: string; options: string[] }) => {
+      if (!user) return { ok: false, error: "Not signed in." };
+      const room = rooms.find((r) => r.id === roomId);
+      if (!room?.memberIds.includes(user.id)) {
+        return { ok: false, error: "You are not in this room." };
+      }
+      const title = data.title.trim();
+      if (!title) {
+        return { ok: false, error: "Add a decision title." };
+      }
+      if (data.options.length < 2) {
+        return { ok: false, error: "Add at least two options." };
+      }
+      try {
+        await saveDecisionOptions(roomId, title, data.options, user.id);
+        await loadAll();
+        return { ok: true };
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Could not save decision options.";
+        return { ok: false, error: message };
+      }
+    },
+    [user, rooms, loadAll]
+  );
+
   const pushNotification = useCallback(
     (type: Notification["type"], title: string, message: string) => {
       if (!user) return;
@@ -701,11 +828,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const toggleOnline = useCallback(
     (online: boolean) => {
       if (!user) return;
-      void saveUsers(users.map((u) => (u.id === user.id ? { ...u, online } : u))).then(() =>
-        loadAll()
-      );
+      void setUserOnline(user.id, online).then(() => loadAll());
     },
-    [user, users, loadAll]
+    [user, loadAll]
   );
 
   const requestPersonalRoomAccess = useCallback(
@@ -799,6 +924,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       polls,
       suggestions,
       suggestionCategoriesByRoom,
+      decisionOptionsByRoom,
       notifications,
       roomNicknames,
       nicknameRequests,
@@ -808,6 +934,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       signOut,
       updateAvatar,
       addFriendByEmail,
+      removeFriend,
+      deleteAccount,
+      leaveRoom,
       createRoom,
       setRoomNickname,
       requestNicknameForFriend,
@@ -829,6 +958,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       likeSuggestion,
       getWeeklyTopSuggestions,
       getArchivedSuggestions,
+      getRoomDecisionOptions,
+      getRoomDecisionTitle,
+      setRoomDecisionOptions: setRoomDecisionOptionsHandler,
+      notifyRoomDecision,
       pushNotification,
       markNotificationRead,
       toggleOnline,
@@ -848,6 +981,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       polls,
       suggestions,
       suggestionCategoriesByRoom,
+      decisionOptionsByRoom,
       notifications,
       roomNicknames,
       nicknameRequests,
@@ -857,6 +991,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       signOut,
       updateAvatar,
       addFriendByEmail,
+      removeFriend,
+      deleteAccount,
+      leaveRoom,
       createRoom,
       setRoomNickname,
       requestNicknameForFriend,
@@ -878,6 +1015,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       likeSuggestion,
       getWeeklyTopSuggestions,
       getArchivedSuggestions,
+      getRoomDecisionOptions,
+      getRoomDecisionTitle,
+      setRoomDecisionOptionsHandler,
+      notifyRoomDecision,
       pushNotification,
       markNotificationRead,
       toggleOnline,

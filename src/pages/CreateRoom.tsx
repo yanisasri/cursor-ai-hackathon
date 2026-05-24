@@ -116,7 +116,7 @@ export function CreateRoom() {
             </p>
             <div className="flex flex-wrap gap-2">
               {friends.length === 0 ? (
-                <p className="text-sm text-cozy-500">No friends yet — sign up adds demo friends.</p>
+                <p className="text-sm text-cozy-500">No friends yet — add friends by email from the home sidebar.</p>
               ) : (
                 friends.map((f) => (
                   <button

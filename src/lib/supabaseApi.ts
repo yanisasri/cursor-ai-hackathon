@@ -22,53 +22,55 @@ function inFilter(ids: string[]): string {
   return `(${ids.map((id) => `"${id}"`).join(",")})`;
 }
 
-const LEGACY_HAIR_BY_INDEX: Record<number, string> = {
-  4: "short",
-  8: "bangs",
-  14: "medium",
-  22: "curly",
-  28: "ponytail",
-  32: "long",
-  38: "bun",
-};
-
-function legacyHairstyleFromIndex(hairIndex: number): string {
-  const exact = LEGACY_HAIR_BY_INDEX[hairIndex];
-  if (exact) return exact;
-  if (hairIndex <= 7) return "short";
-  if (hairIndex <= 12) return "bangs";
-  if (hairIndex <= 20) return "medium";
-  if (hairIndex <= 26) return "curly";
-  if (hairIndex <= 31) return "ponytail";
-  if (hairIndex <= 36) return "long";
-  return "bun";
-}
-
-function hairIndexFromLegacy(hairstyle: unknown): number {
-  const normalized = String(hairstyle ?? "").toLowerCase();
-  const map: Record<string, number> = {
-    short: 4,
-    bangs: 8,
-    medium: 14,
-    curly: 22,
-    ponytail: 28,
-    long: 32,
-    bun: 38,
-  };
-  return map[normalized] ?? DEFAULT_AVATAR.hairIndex;
-}
-
-function toLegacyAvatarColumns(avatar: User["avatar"]) {
+function avatarFromDbRow(row: Record<string, unknown>): User["avatar"] {
   return {
-    hairstyle: legacyHairstyleFromIndex(avatar.hairIndex),
-    hair_color: avatar.hairColor,
-    shirt_style: "tee",
-    shirt_color: "#7c5cbf",
-    bottom_style: "pants",
-    bottom_color: "#1d3557",
-    shoes: "sneakers",
-    accessory: avatar.glassesIndex > 0 ? "glasses" : "none",
+    seed: typeof row.seed === "string" ? row.seed : DEFAULT_AVATAR.seed,
+    skinTone: String(row.skin_tone ?? DEFAULT_AVATAR.skinTone),
+    hairColor: String(row.hair_color ?? DEFAULT_AVATAR.hairColor),
+    eyesColor: String(row.eyes_color ?? DEFAULT_AVATAR.eyesColor),
+    mouthColor: String(row.mouth_color ?? DEFAULT_AVATAR.mouthColor),
+    hairIndex:
+      typeof row.hair_index === "number" ? row.hair_index : DEFAULT_AVATAR.hairIndex,
+    eyesIndex:
+      typeof row.eyes_index === "number" ? row.eyes_index : DEFAULT_AVATAR.eyesIndex,
+    eyebrowsIndex:
+      typeof row.eyebrows_index === "number"
+        ? row.eyebrows_index
+        : DEFAULT_AVATAR.eyebrowsIndex,
+    mouthIndex:
+      typeof row.mouth_index === "number" ? row.mouth_index : DEFAULT_AVATAR.mouthIndex,
+    glassesIndex:
+      typeof row.glasses_index === "number"
+        ? row.glasses_index
+        : DEFAULT_AVATAR.glassesIndex,
+    earringsIndex:
+      typeof row.earrings_index === "number"
+        ? row.earrings_index
+        : DEFAULT_AVATAR.earringsIndex,
+    freckles: typeof row.freckles === "boolean" ? row.freckles : DEFAULT_AVATAR.freckles,
+  };
+}
+
+function avatarToDbRow(
+  userId: string,
+  avatar: User["avatar"],
+  avatarCustomized: boolean
+): Record<string, unknown> {
+  return {
+    user_id: userId,
+    seed: avatar.seed ?? null,
     skin_tone: avatar.skinTone,
+    hair_color: avatar.hairColor,
+    eyes_color: avatar.eyesColor,
+    mouth_color: avatar.mouthColor,
+    hair_index: avatar.hairIndex,
+    eyes_index: avatar.eyesIndex,
+    eyebrows_index: avatar.eyebrowsIndex,
+    mouth_index: avatar.mouthIndex,
+    glasses_index: avatar.glassesIndex,
+    earrings_index: avatar.earringsIndex,
+    freckles: avatar.freckles,
+    avatar_customized: avatarCustomized,
   };
 }
 
@@ -90,21 +92,9 @@ export const supabaseApi = {
     });
     throwIfError(userError);
 
-    const { error: avatarError } = await supabase.from("user_avatars").upsert({
-      user_id: input.id,
-      ...toLegacyAvatarColumns(input.avatar),
-      seed: input.avatar.seed ?? null,
-      eyes_color: input.avatar.eyesColor,
-      mouth_color: input.avatar.mouthColor,
-      hair_index: input.avatar.hairIndex,
-      eyes_index: input.avatar.eyesIndex,
-      eyebrows_index: input.avatar.eyebrowsIndex,
-      mouth_index: input.avatar.mouthIndex,
-      glasses_index: input.avatar.glassesIndex,
-      earrings_index: input.avatar.earringsIndex,
-      freckles: input.avatar.freckles,
-      avatar_customized: input.avatarCustomized,
-    });
+    const { error: avatarError } = await supabase
+      .from("user_avatars")
+      .upsert(avatarToDbRow(input.id, input.avatar, input.avatarCustomized));
     throwIfError(avatarError);
   },
 
@@ -145,35 +135,7 @@ export const supabaseApi = {
       (avatars ?? []).map((a) => [
         String(a.user_id),
         {
-          seed: typeof a.seed === "string" ? a.seed : DEFAULT_AVATAR.seed,
-          skinTone: String(a.skin_tone ?? DEFAULT_AVATAR.skinTone),
-          hairColor: String(a.hair_color ?? DEFAULT_AVATAR.hairColor),
-          eyesColor: String(a.eyes_color ?? DEFAULT_AVATAR.eyesColor),
-          mouthColor: String(a.mouth_color ?? DEFAULT_AVATAR.mouthColor),
-          hairIndex:
-            typeof a.hair_index === "number"
-              ? a.hair_index
-              : hairIndexFromLegacy(a.hairstyle),
-          eyesIndex:
-            typeof a.eyes_index === "number" ? a.eyes_index : DEFAULT_AVATAR.eyesIndex,
-          eyebrowsIndex:
-            typeof a.eyebrows_index === "number"
-              ? a.eyebrows_index
-              : DEFAULT_AVATAR.eyebrowsIndex,
-          mouthIndex:
-            typeof a.mouth_index === "number" ? a.mouth_index : DEFAULT_AVATAR.mouthIndex,
-          glassesIndex:
-            typeof a.glasses_index === "number"
-              ? a.glasses_index
-              : String(a.accessory ?? "none").toLowerCase() === "glasses"
-                ? 1
-                : DEFAULT_AVATAR.glassesIndex,
-          earringsIndex:
-            typeof a.earrings_index === "number"
-              ? a.earrings_index
-              : DEFAULT_AVATAR.earringsIndex,
-          freckles:
-            typeof a.freckles === "boolean" ? a.freckles : DEFAULT_AVATAR.freckles,
+          avatar: avatarFromDbRow(a as Record<string, unknown>),
           avatarCustomized: Boolean(a.avatar_customized),
         },
       ])
@@ -196,15 +158,97 @@ export const supabaseApi = {
         email: String(u.email),
         password: String(u.password_hash),
         displayName: String(u.display_name),
-        avatar: {
-          ...DEFAULT_AVATAR,
-          ...(av ?? {}),
-        },
+        avatar: av?.avatar ?? { ...DEFAULT_AVATAR },
         friendIds: Array.from(friendMap.get(String(u.id)) ?? []),
         online: Boolean(u.is_online),
         avatarCustomized: av?.avatarCustomized ?? false,
       };
     });
+  },
+
+  async setUserOnline(userId: string, isOnline: boolean): Promise<void> {
+    const { error } = await supabase
+      .from("users")
+      .update({ is_online: isOnline })
+      .eq("id", userId);
+    throwIfError(error);
+  },
+
+  async upsertUserAvatars(users: User[]): Promise<void> {
+    if (users.length === 0) return;
+    const avatarRows = users.map((u) =>
+      avatarToDbRow(u.id, u.avatar, Boolean(u.avatarCustomized))
+    );
+    const { error } = await supabase.from("user_avatars").upsert(avatarRows);
+    throwIfError(error);
+  },
+
+  async removeFriendship(userId: string, friendId: string): Promise<void> {
+    const [user_id, friend_id] =
+      userId < friendId ? [userId, friendId] : [friendId, userId];
+    const { error } = await supabase
+      .from("friendships")
+      .delete()
+      .eq("user_id", user_id)
+      .eq("friend_id", friend_id)
+      .eq("status", "accepted");
+    throwIfError(error);
+  },
+
+  async deleteAccount(userId: string): Promise<void> {
+    const { data: ownedRooms, error: ownedRoomsError } = await supabase
+      .from("rooms")
+      .select("id")
+      .eq("owner_id", userId);
+    throwIfError(ownedRoomsError);
+    const ownedRoomIds = (ownedRooms ?? []).map((r) => String(r.id));
+
+    const deletes = [
+      supabase.from("friendships").delete().or(`user_id.eq.${userId},friend_id.eq.${userId}`),
+      supabase.from("user_avatars").delete().eq("user_id", userId),
+      supabase.from("room_members").delete().eq("user_id", userId),
+      supabase.from("room_nicknames").delete().eq("user_id", userId),
+      supabase
+        .from("nickname_requests")
+        .delete()
+        .or(`from_user_id.eq.${userId},to_user_id.eq.${userId}`),
+      supabase.from("notifications").delete().eq("user_id", userId),
+      supabase.from("room_messages").delete().eq("user_id", userId),
+      supabase.from("calendar_connections").delete().eq("user_id", userId),
+      supabase.from("calendar_event_rsvps").delete().eq("user_id", userId),
+      supabase.from("calendar_events").delete().eq("creator_user_id", userId),
+      supabase.from("suggestion_likes").delete().eq("user_id", userId),
+      supabase.from("poll_votes").delete().eq("user_id", userId),
+      supabase
+        .from("personal_room_access")
+        .delete()
+        .or(`owner_id.eq.${userId},granted_user_id.eq.${userId}`),
+      supabase
+        .from("personal_room_pending_requests")
+        .delete()
+        .or(`owner_id.eq.${userId},requester_user_id.eq.${userId}`),
+    ];
+
+    for (const query of deletes) {
+      const { error } = await query;
+      throwIfError(error);
+    }
+
+    if (ownedRoomIds.length > 0) {
+      const { error: clearMembersError } = await supabase
+        .from("room_members")
+        .delete()
+        .in("room_id", ownedRoomIds);
+      throwIfError(clearMembersError);
+      const { error: deleteRoomsError } = await supabase
+        .from("rooms")
+        .delete()
+        .in("id", ownedRoomIds);
+      throwIfError(deleteRoomsError);
+    }
+
+    const { error: deleteUserError } = await supabase.from("users").delete().eq("id", userId);
+    throwIfError(deleteUserError);
   },
 
   async saveUsers(users: User[]): Promise<void> {
@@ -214,21 +258,6 @@ export const supabaseApi = {
       password_hash: u.password,
       display_name: u.displayName,
       is_online: u.online,
-    }));
-    const avatarRows = users.map((u) => ({
-      user_id: u.id,
-      ...toLegacyAvatarColumns(u.avatar),
-      seed: u.avatar.seed ?? null,
-      eyes_color: u.avatar.eyesColor,
-      mouth_color: u.avatar.mouthColor,
-      hair_index: u.avatar.hairIndex,
-      eyes_index: u.avatar.eyesIndex,
-      eyebrows_index: u.avatar.eyebrowsIndex,
-      mouth_index: u.avatar.mouthIndex,
-      glasses_index: u.avatar.glassesIndex,
-      earrings_index: u.avatar.earringsIndex,
-      freckles: u.avatar.freckles,
-      avatar_customized: Boolean(u.avatarCustomized),
     }));
     const pairSet = new Set<string>();
     const friendshipRows: Array<{
@@ -256,8 +285,6 @@ export const supabaseApi = {
 
     const { error: usersUpsertError } = await supabase.from("users").upsert(userRows);
     throwIfError(usersUpsertError);
-    const { error: avatarsUpsertError } = await supabase.from("user_avatars").upsert(avatarRows);
-    throwIfError(avatarsUpsertError);
 
     const { error: friendshipsDeleteError } = await supabase
       .from("friendships")
@@ -361,6 +388,93 @@ export const supabaseApi = {
         .from("room_members")
         .insert(membershipRows);
       throwIfError(membersError);
+    }
+  },
+
+  async deleteRoom(roomId: string): Promise<void> {
+    const { data: polls, error: pollsError } = await supabase
+      .from("polls")
+      .select("id")
+      .eq("room_id", roomId);
+    throwIfError(pollsError);
+    const pollIds = (polls ?? []).map((p) => String(p.id));
+    if (pollIds.length > 0) {
+      const { error: votesError } = await supabase
+        .from("poll_votes")
+        .delete()
+        .in("poll_id", pollIds);
+      throwIfError(votesError);
+      const { error: optionsError } = await supabase
+        .from("poll_options")
+        .delete()
+        .in("poll_id", pollIds);
+      throwIfError(optionsError);
+      const { error: pollsDeleteError } = await supabase.from("polls").delete().in("id", pollIds);
+      throwIfError(pollsDeleteError);
+    }
+
+    const { data: suggestions, error: suggestionsError } = await supabase
+      .from("suggestions")
+      .select("id")
+      .eq("room_id", roomId);
+    throwIfError(suggestionsError);
+    const suggestionIds = (suggestions ?? []).map((s) => String(s.id));
+    if (suggestionIds.length > 0) {
+      const { error: likesError } = await supabase
+        .from("suggestion_likes")
+        .delete()
+        .in("suggestion_id", suggestionIds);
+      throwIfError(likesError);
+      const { error: suggestionsDeleteError } = await supabase
+        .from("suggestions")
+        .delete()
+        .in("id", suggestionIds);
+      throwIfError(suggestionsDeleteError);
+    }
+
+    const roomScopedDeletes = [
+      supabase.from("room_messages").delete().eq("room_id", roomId),
+      supabase.from("room_nicknames").delete().eq("room_id", roomId),
+      supabase.from("nickname_requests").delete().eq("room_id", roomId),
+      supabase.from("calendar_events").delete().eq("room_id", roomId),
+      supabase.from("personal_room_access").delete().eq("room_id", roomId),
+      supabase.from("personal_room_pending_requests").delete().eq("room_id", roomId),
+      supabase.from("suggestion_categories").delete().eq("room_id", roomId),
+      supabase.from("room_members").delete().eq("room_id", roomId),
+    ];
+    for (const query of roomScopedDeletes) {
+      const { error } = await query;
+      throwIfError(error);
+    }
+
+    const { error: roomDeleteError } = await supabase.from("rooms").delete().eq("id", roomId);
+    throwIfError(roomDeleteError);
+  },
+
+  async leaveRoom(roomId: string, userId: string): Promise<void> {
+    const room = (await this.getRooms()).find((r) => r.id === roomId);
+    if (!room) throw new Error("Room not found.");
+    if (!room.memberIds.includes(userId)) throw new Error("You are not in this room.");
+
+    const nextMemberIds = room.memberIds.filter((id) => id !== userId);
+    if (nextMemberIds.length <= 1) {
+      await this.deleteRoom(roomId);
+      return;
+    }
+
+    const { error: memberError } = await supabase
+      .from("room_members")
+      .delete()
+      .eq("room_id", roomId)
+      .eq("user_id", userId);
+    throwIfError(memberError);
+
+    if (room.ownerId === userId) {
+      const { error: ownerError } = await supabase
+        .from("rooms")
+        .update({ owner_id: nextMemberIds[0] })
+        .eq("id", roomId);
+      throwIfError(ownerError);
     }
   },
 

@@ -1,5 +1,4 @@
 import type {
-  AvatarConfig,
   CalendarConnection,
   CalendarEvent,
   CalendarSlot,
@@ -7,6 +6,7 @@ import type {
   Notification,
   PersonalRoomAccess,
   Poll,
+  RoomDecisionOptions,
   RoomMessage,
   RoomNickname,
   Suggestion,
@@ -14,11 +14,13 @@ import type {
   VirtualRoom,
 } from "../types";
 import { ARCHIVE_DAYS, DEFAULT_AVATAR } from "../types";
+import { createAvatarSeed } from "./generateAvatar";
 import { supabaseApi } from "./supabaseApi";
 
 const KEYS = {
   session: "hangout_session",
   calendar: "hangout_calendar",
+  decisionOptions: "hangout_decision_options",
 } as const;
 
 function read<T>(key: string, fallback: T): T {
@@ -66,6 +68,22 @@ export async function saveUsers(users: User[]): Promise<void> {
   await supabaseApi.saveUsers(users);
 }
 
+export async function setUserOnline(userId: string, isOnline: boolean): Promise<void> {
+  await supabaseApi.setUserOnline(userId, isOnline);
+}
+
+export async function upsertUserAvatars(users: User[]): Promise<void> {
+  await supabaseApi.upsertUserAvatars(users);
+}
+
+export async function removeFriendship(userId: string, friendId: string): Promise<void> {
+  await supabaseApi.removeFriendship(userId, friendId);
+}
+
+export async function deleteAccount(userId: string): Promise<void> {
+  await supabaseApi.deleteAccount(userId);
+}
+
 export async function getRooms(): Promise<VirtualRoom[]> {
   return supabaseApi.getRooms();
 }
@@ -76,6 +94,14 @@ export async function saveRooms(rooms: VirtualRoom[]): Promise<void> {
 
 export async function createRoomRecord(room: VirtualRoom): Promise<void> {
   await supabaseApi.createRoom(room);
+}
+
+export async function leaveRoom(roomId: string, userId: string): Promise<void> {
+  await supabaseApi.leaveRoom(roomId, userId);
+  const rooms = await getRooms();
+  if (!rooms.some((r) => r.id === roomId)) {
+    removeLocalDecisionOptionsForRoom(roomId);
+  }
 }
 
 export function getCalendarSlots(): CalendarSlot[] {
@@ -183,222 +209,56 @@ export async function savePersonalRoomAccess(access: PersonalRoomAccess[]): Prom
   await supabaseApi.savePersonalRoomAccess(access);
 }
 
-/** Stable demo friend IDs so they persist across sessions (7 friends + you = 8 max) */
-export const DEMO_FRIEND_IDS = {
-  alex: "demo-friend-alex",
-  sam: "demo-friend-sam",
-  jordan: "demo-friend-jordan",
-  casey: "demo-friend-casey",
-  morgan: "demo-friend-morgan",
-  riley: "demo-friend-riley",
-  taylor: "demo-friend-taylor",
-} as const;
-
-const ALL_DEMO_IDS = Object.values(DEMO_FRIEND_IDS);
-
-type DemoProfile = {
-  id: string;
-  email: string;
-  displayName: string;
-  avatar: AvatarConfig;
-};
-
-const DEMO_PROFILES: DemoProfile[] = [
-  {
-    id: DEMO_FRIEND_IDS.alex,
-    email: "alex@demo.com",
-    displayName: "Alex",
-    avatar: {
-      seed: "demo-alex",
-      skinTone: "#e8c4a8",
-      hairColor: "#2c1810",
-      eyesColor: "#000000",
-      mouthColor: "#000000",
-      hairIndex: 4,
-      eyesIndex: 3,
-      eyebrowsIndex: 2,
-      mouthIndex: 1,
-      glassesIndex: 0,
-      earringsIndex: 0,
-      freckles: false,
-    },
-  },
-  {
-    id: DEMO_FRIEND_IDS.sam,
-    email: "sam@demo.com",
-    displayName: "Sam",
-    avatar: {
-      seed: "demo-sam",
-      skinTone: "#d4a574",
-      hairColor: "#8b5a2b",
-      eyesColor: "#000000",
-      mouthColor: "#000000",
-      hairIndex: 22,
-      eyesIndex: 5,
-      eyebrowsIndex: 4,
-      mouthIndex: 2,
-      glassesIndex: 2,
-      earringsIndex: 1,
-      freckles: true,
-    },
-  },
-  {
-    id: DEMO_FRIEND_IDS.jordan,
-    email: "jordan@demo.com",
-    displayName: "Jordan",
-    avatar: {
-      seed: "demo-jordan",
-      skinTone: "#c68642",
-      hairColor: "#1a1a2e",
-      eyesColor: "#000000",
-      mouthColor: "#000000",
-      hairIndex: 38,
-      eyesIndex: 8,
-      eyebrowsIndex: 6,
-      mouthIndex: 4,
-      glassesIndex: 0,
-      earringsIndex: 2,
-      freckles: false,
-    },
-  },
-  {
-    id: DEMO_FRIEND_IDS.casey,
-    email: "casey@demo.com",
-    displayName: "Casey",
-    avatar: {
-      seed: "demo-casey",
-      skinTone: "#f5d0b5",
-      hairColor: "#5c4033",
-      eyesColor: "#000000",
-      mouthColor: "#000000",
-      hairIndex: 14,
-      eyesIndex: 2,
-      eyebrowsIndex: 1,
-      mouthIndex: 0,
-      glassesIndex: 0,
-      earringsIndex: 0,
-      freckles: false,
-    },
-  },
-  {
-    id: DEMO_FRIEND_IDS.morgan,
-    email: "morgan@demo.com",
-    displayName: "Morgan",
-    avatar: {
-      seed: "demo-morgan",
-      skinTone: "#d4a574",
-      hairColor: "#6a040f",
-      eyesColor: "#000000",
-      mouthColor: "#000000",
-      hairIndex: 28,
-      eyesIndex: 6,
-      eyebrowsIndex: 3,
-      mouthIndex: 1,
-      glassesIndex: 1,
-      earringsIndex: 0,
-      freckles: false,
-    },
-  },
-  {
-    id: DEMO_FRIEND_IDS.riley,
-    email: "riley@demo.com",
-    displayName: "Riley",
-    avatar: {
-      seed: "demo-riley",
-      skinTone: "#e8c4a8",
-      hairColor: "#3d005b",
-      eyesColor: "#000000",
-      mouthColor: "#000000",
-      hairIndex: 8,
-      eyesIndex: 4,
-      eyebrowsIndex: 2,
-      mouthIndex: 3,
-      glassesIndex: 0,
-      earringsIndex: 1,
-      freckles: true,
-    },
-  },
-  {
-    id: DEMO_FRIEND_IDS.taylor,
-    email: "taylor@demo.com",
-    displayName: "Taylor",
-    avatar: {
-      seed: "demo-taylor",
-      skinTone: "#c68642",
-      hairColor: "#4a3728",
-      eyesColor: "#000000",
-      mouthColor: "#000000",
-      hairIndex: 32,
-      eyesIndex: 7,
-      eyebrowsIndex: 5,
-      mouthIndex: 2,
-      glassesIndex: 0,
-      earringsIndex: 0,
-      freckles: false,
-    },
-  },
-];
-
-function buildDemoUser(profile: DemoProfile, currentUserId: string, passwordHash: string): User {
+function normalizeDecisionEntry(
+  roomId: string,
+  entry: Partial<RoomDecisionOptions>
+): RoomDecisionOptions {
   return {
-    id: profile.id,
-    email: profile.email,
-    password: passwordHash,
-    displayName: profile.displayName,
-    avatar: profile.avatar,
-    friendIds: [
-      currentUserId,
-      ...ALL_DEMO_IDS.filter((id) => id !== profile.id),
-    ],
-    online: true,
-    avatarCustomized: true,
+    roomId,
+    title: entry.title ?? "",
+    options: Array.isArray(entry.options) ? entry.options : [],
+    updatedBy: entry.updatedBy ?? "",
+    updatedAt: entry.updatedAt ?? new Date().toISOString(),
   };
 }
 
-/** Create any missing demo users and link them to the current user */
-export async function ensureDemoFriends(currentUserId: string): Promise<void> {
-  let users = await getUsers();
-  const current = users.find((u) => u.id === currentUserId);
-  if (!current) return;
-  const passwordHash = await sha256("demo123");
-
-  for (const profile of DEMO_PROFILES) {
-    if (!users.some((u) => u.id === profile.id)) {
-      users = [...users, buildDemoUser(profile, currentUserId, passwordHash)];
-    }
-  }
-
-  users = users.map((u) => {
-    if (u.id === currentUserId) {
-      return {
-        ...u,
-        friendIds: [...new Set([...u.friendIds, ...ALL_DEMO_IDS])],
-      };
-    }
-    if (ALL_DEMO_IDS.includes(u.id as (typeof ALL_DEMO_IDS)[number])) {
-      return {
-        ...u,
-        friendIds: [
-          ...new Set([
-            ...u.friendIds,
-            currentUserId,
-            ...ALL_DEMO_IDS.filter((id) => id !== u.id),
-          ]),
-        ],
-      };
-    }
-    return u;
-  });
-
-  await saveUsers(users);
+function readLocalDecisionOptions(): Record<string, RoomDecisionOptions> {
+  const raw = read<Record<string, Partial<RoomDecisionOptions>>>(KEYS.decisionOptions, {});
+  return Object.fromEntries(
+    Object.entries(raw).map(([roomId, entry]) => [roomId, normalizeDecisionEntry(roomId, entry)])
+  );
 }
 
-export async function linkExistingDemoFriends(currentUserId: string): Promise<void> {
-  await ensureDemoFriends(currentUserId);
+function writeLocalDecisionOptions(data: Record<string, RoomDecisionOptions>): void {
+  write(KEYS.decisionOptions, data);
 }
 
-export async function seedDemoFriends(currentUserId: string): Promise<void> {
-  await ensureDemoFriends(currentUserId);
+function removeLocalDecisionOptionsForRoom(roomId: string): void {
+  const local = readLocalDecisionOptions();
+  if (!(roomId in local)) return;
+  const { [roomId]: _removed, ...rest } = local;
+  writeLocalDecisionOptions(rest);
+}
+
+export async function getDecisionOptionsByRoom(): Promise<Record<string, RoomDecisionOptions>> {
+  return readLocalDecisionOptions();
+}
+
+export async function saveDecisionOptions(
+  roomId: string,
+  title: string,
+  options: string[],
+  userId: string
+): Promise<void> {
+  const entry: RoomDecisionOptions = {
+    roomId,
+    title: title.trim(),
+    options,
+    updatedBy: userId,
+    updatedAt: new Date().toISOString(),
+  };
+  const local = readLocalDecisionOptions();
+  writeLocalDecisionOptions({ ...local, [roomId]: entry });
 }
 
 export async function ensurePersonalRoomsForRoom(room: VirtualRoom): Promise<PersonalRoomAccess[]> {
@@ -442,7 +302,7 @@ export async function createUser(
     email: normalized,
     password: passwordHash,
     displayName: normalized.split("@")[0],
-    avatar: { ...DEFAULT_AVATAR },
+    avatar: { ...DEFAULT_AVATAR, seed: createAvatarSeed() },
     friendIds: [],
     online: true,
     avatarCustomized: false,

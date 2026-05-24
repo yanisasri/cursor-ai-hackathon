@@ -1,9 +1,18 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useApp } from "../../context/AppContext";
 
 const TIERS = ["S", "A", "B", "C", "D"] as const;
 
-export function TierList() {
-  const [pool, setPool] = useState(["Sushi", "Tacos", "Pizza", "Burgers", "Ramen"]);
+interface Props {
+  roomId: string;
+}
+
+export function TierList({ roomId }: Props) {
+  const { user, users, getRoomDecisionOptions, getRoomDecisionTitle, notifyRoomDecision } =
+    useApp();
+  const roomOptions = getRoomDecisionOptions(roomId);
+  const decisionTitle = getRoomDecisionTitle(roomId);
+  const [pool, setPool] = useState<string[]>([]);
   const [tiers, setTiers] = useState<Record<string, string[]>>({
     S: [],
     A: [],
@@ -12,6 +21,16 @@ export function TierList() {
     D: [],
   });
   const [newItem, setNewItem] = useState("");
+  const sessionStarted = useRef(false);
+
+  const isReady = decisionTitle.length > 0 && roomOptions.length >= 2;
+  const actorName = users.find((u) => u.id === user?.id)?.displayName ?? "Someone";
+
+  useEffect(() => {
+    setPool(roomOptions);
+    setTiers({ S: [], A: [], B: [], C: [], D: [] });
+    sessionStarted.current = false;
+  }, [roomOptions.join("\0")]);
 
   const addItem = () => {
     if (!newItem.trim()) return;
@@ -20,24 +39,54 @@ export function TierList() {
   };
 
   const assign = (item: string, tier: string) => {
-    setPool((p) => p.filter((x) => x !== item));
-    setTiers((t) => {
-      const cleaned: Record<string, string[]> = {};
-      for (const k of TIERS) {
-        cleaned[k] = (t[k] ?? []).filter((x) => x !== item);
-      }
-      cleaned[tier] = [...(cleaned[tier] ?? []), item];
-      return cleaned;
-    });
+    if (!user) return;
+    if (!sessionStarted.current) {
+      sessionStarted.current = true;
+      notifyRoomDecision(
+        roomId,
+        "Tier list started",
+        `${actorName} started ranking options for "${decisionTitle}"`
+      );
+    }
+    const nextPool = pool.filter((x) => x !== item);
+    const cleaned: Record<string, string[]> = {};
+    for (const k of TIERS) {
+      cleaned[k] = (tiers[k] ?? []).filter((x) => x !== item);
+    }
+    cleaned[tier] = [...(cleaned[tier] ?? []), item];
+    setPool(nextPool);
+    setTiers(cleaned);
+    if (nextPool.length === 0) {
+      const summary = TIERS.map((tKey) => {
+        const items = cleaned[tKey] ?? [];
+        return items.length > 0 ? `${tKey}: ${items.join(", ")}` : null;
+      })
+        .filter(Boolean)
+        .join(" · ");
+      notifyRoomDecision(
+        roomId,
+        "Tier list completed",
+        `${actorName} finished ranking "${decisionTitle}". ${summary}`
+      );
+    }
   };
+
+  if (!isReady) {
+    return (
+      <div className="rounded-xl border border-cozy-200 bg-cozy-50 p-4 text-sm text-cozy-600">
+        Save a decision title and options above to build a tier list.
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-xl border border-cozy-200 p-4">
       <h4 className="font-semibold">Collaborative tier list</h4>
+      <p className="text-sm text-cozy-500">{decisionTitle}</p>
       <div className="mt-2 flex gap-2">
         <input
           className="input-field"
-          placeholder="Add option"
+          placeholder="Add extra option"
           value={newItem}
           onChange={(e) => setNewItem(e.target.value)}
         />
