@@ -1,7 +1,6 @@
 import {
   isUserAtHome,
   presenceDotClass,
-  presenceLabel,
   type UserPresence,
 } from "../../types";
 

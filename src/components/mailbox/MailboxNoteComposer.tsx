@@ -28,8 +28,8 @@ export function MailboxNoteComposer({
   replyToNoteId,
 }: Props) {
   const [body, setBody] = useState("");
-  const [paperColor, setPaperColor] = useState(MAILBOX_PAPER_COLORS[0].value);
-  const [envelopeColor, setEnvelopeColor] = useState(MAILBOX_ENVELOPE_COLORS[0].value);
+  const [paperColor, setPaperColor] = useState<string>(MAILBOX_PAPER_COLORS[0].value);
+  const [envelopeColor, setEnvelopeColor] = useState<string>(MAILBOX_ENVELOPE_COLORS[0].value);
   const [stickers, setStickers] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
