@@ -39,6 +39,8 @@ import {
   saveUsers,
   seedDemoFriends,
   setSessionUserId,
+  setUserOnline,
+  upsertUserAvatars,
   verifyCredentials,
 } from "../lib/storage";
 import {
@@ -236,12 +238,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const found = await verifyCredentials(email, password);
       if (!found) return { ok: false, error: "Invalid email or password." };
 
-      // Always update presence from fresh DB state to avoid stale in-memory overwrites.
-      const allUsers = await getUsers();
-      const nextUsers = allUsers.map((u) =>
-        u.id === found.id ? { ...u, online: true } : u
-      );
-      await saveUsers(nextUsers);
+      await setUserOnline(found.id, true);
 
       setSessionUserId(found.id);
 
@@ -264,22 +261,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(() => {
     if (user) {
-      const nextUsers = users.map((u) => (u.id === user.id ? { ...u, online: false } : u));
-      void saveUsers(nextUsers).then(() => loadAll());
+      void setUserOnline(user.id, false).then(() => loadAll());
     }
     setSessionUserId(null);
     setUser(null);
-  }, [user, users, loadAll]);
+  }, [user, loadAll]);
 
   const updateAvatar = useCallback(
     (avatar: AvatarConfig) => {
       if (!user) return;
-      const nextUsers = users.map((u) =>
-        u.id === user.id ? { ...u, avatar, avatarCustomized: true } : u
+      void upsertUserAvatars([{ ...user, avatar, avatarCustomized: true }]).then(() =>
+        loadAll()
       );
-      void saveUsers(nextUsers).then(() => loadAll());
     },
-    [user, users, loadAll]
+    [user, loadAll]
   );
 
   const addFriendByEmail = useCallback(
@@ -701,11 +696,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const toggleOnline = useCallback(
     (online: boolean) => {
       if (!user) return;
-      void saveUsers(users.map((u) => (u.id === user.id ? { ...u, online } : u))).then(() =>
-        loadAll()
-      );
+      void setUserOnline(user.id, online).then(() => loadAll());
     },
-    [user, users, loadAll]
+    [user, loadAll]
   );
 
   const requestPersonalRoomAccess = useCallback(

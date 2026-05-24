@@ -14,6 +14,7 @@ import type {
   VirtualRoom,
 } from "../types";
 import { ARCHIVE_DAYS, DEFAULT_AVATAR } from "../types";
+import { createAvatarSeed } from "./generateAvatar";
 import { supabaseApi } from "./supabaseApi";
 
 const KEYS = {
@@ -64,6 +65,14 @@ export async function getUsers(): Promise<User[]> {
 
 export async function saveUsers(users: User[]): Promise<void> {
   await supabaseApi.saveUsers(users);
+}
+
+export async function setUserOnline(userId: string, isOnline: boolean): Promise<void> {
+  await supabaseApi.setUserOnline(userId, isOnline);
+}
+
+export async function upsertUserAvatars(users: User[]): Promise<void> {
+  await supabaseApi.upsertUserAvatars(users);
 }
 
 export async function getRooms(): Promise<VirtualRoom[]> {
@@ -361,10 +370,13 @@ export async function ensureDemoFriends(currentUserId: string): Promise<void> {
   const current = users.find((u) => u.id === currentUserId);
   if (!current) return;
   const passwordHash = await sha256("demo123");
+  const added: User[] = [];
 
   for (const profile of DEMO_PROFILES) {
     if (!users.some((u) => u.id === profile.id)) {
-      users = [...users, buildDemoUser(profile, currentUserId, passwordHash)];
+      const demoUser = buildDemoUser(profile, currentUserId, passwordHash);
+      users = [...users, demoUser];
+      added.push(demoUser);
     }
   }
 
@@ -391,6 +403,9 @@ export async function ensureDemoFriends(currentUserId: string): Promise<void> {
   });
 
   await saveUsers(users);
+  if (added.length > 0) {
+    await upsertUserAvatars(added);
+  }
 }
 
 export async function linkExistingDemoFriends(currentUserId: string): Promise<void> {
@@ -442,7 +457,7 @@ export async function createUser(
     email: normalized,
     password: passwordHash,
     displayName: normalized.split("@")[0],
-    avatar: { ...DEFAULT_AVATAR },
+    avatar: { ...DEFAULT_AVATAR, seed: createAvatarSeed() },
     friendIds: [],
     online: true,
     avatarCustomized: false,
