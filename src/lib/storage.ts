@@ -334,7 +334,7 @@ export async function savePersonalRoomAccess(access: PersonalRoomAccess[]): Prom
     return {
       ...inc,
       grantedIds: [...new Set([inc.ownerId, ...inc.grantedIds])],
-      activeGuestId: inc.activeGuestId ?? lat.activeGuestId ?? null,
+      activeGuestId: inc.activeGuestId ?? lat?.activeGuestId ?? null,
       pendingRequests: pendingSubsetRemoval
         ? inc.pendingRequests
         : [...pendingByUser.values()],

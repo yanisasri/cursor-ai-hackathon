@@ -37,7 +37,7 @@ export function mergePersonalRoomAccessLists(
     resultMap.set(key, {
       ...fetchedEntry,
       grantedIds: [...new Set([fetchedEntry.ownerId, ...fetchedEntry.grantedIds])],
-      activeGuestId: fetchedEntry.activeGuestId ?? prevEntry.activeGuestId ?? null,
+      activeGuestId: fetchedEntry.activeGuestId ?? null,
       pendingRequests: [...pendingByUser.values()],
     });
   }

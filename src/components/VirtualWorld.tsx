@@ -664,6 +664,22 @@ export function VirtualWorld({
   }, [target, clamp, heldKeysRef]);
 
   useEffect(() => {
+    const leavePreviousPersonalZone = (
+      previousKey: string | null,
+      nextZone?: (typeof zones)[number]
+    ) => {
+      if (!previousKey?.startsWith("personal:")) return;
+      const previousOwnerId = previousKey.slice("personal:".length);
+      if (!previousOwnerId) return;
+      const stayingInSamePersonal =
+        nextZone?.type === "personal" &&
+        "ownerId" in nextZone &&
+        String(nextZone.ownerId ?? "") === previousOwnerId;
+      if (!stayingInSamePersonal) {
+        onPersonalRoomZoneLeave?.(previousOwnerId);
+      }
+    };
+
     const zones = [...BASE_ZONES, ...personalZones];
     for (const z of zones) {
       if (
@@ -680,6 +696,7 @@ export function VirtualWorld({
         const zoneKey =
           z.type === "personal" && "ownerId" in z ? `personal:${z.ownerId}` : z.type;
         if (lastZoneRef.current !== zoneKey) {
+          leavePreviousPersonalZone(lastZoneRef.current, z);
           lastZoneRef.current = zoneKey;
           if (z.type === "personal" && "ownerId" in z) {
             const ownerId = String(z.ownerId ?? "");
@@ -703,11 +720,7 @@ export function VirtualWorld({
 
     leaveZoneTimerRef.current = window.setTimeout(() => {
       leaveZoneTimerRef.current = null;
-      const prev = lastZoneRef.current;
-      if (prev?.startsWith("personal:")) {
-        const ownerId = prev.slice("personal:".length);
-        if (ownerId) onPersonalRoomZoneLeave?.(ownerId);
-      }
+      leavePreviousPersonalZone(lastZoneRef.current);
       lastZoneRef.current = null;
       onClearPersonalRoomVisit?.();
     }, 450);
