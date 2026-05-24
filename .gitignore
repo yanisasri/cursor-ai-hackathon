@@ -4,3 +4,4 @@ dist
 *.local
 .env
 /database
+package-lock.json
