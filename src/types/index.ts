@@ -161,19 +161,58 @@ export interface NicknameRequest {
 export interface PersonalRoomAccess {
   roomId: string;
   ownerId: string;
+  /** Owner + guests approved to re-enter without ringing again */
   grantedIds: string[];
+  /** Guest physically inside the room right now (0 or 1) */
+  activeGuestId: string | null;
   pendingRequests: { userId: string; requestedAt: string }[];
 }
 
 /** Owner + one guest max inside a personal room */
 export const PERSONAL_ROOM_MAX_OCCUPANCY = 2;
 
-export function getPersonalRoomGuests(access: PersonalRoomAccess): string[] {
-  return access.grantedIds.filter((id) => id !== access.ownerId);
+export function getPersonalRoomActiveGuest(access: PersonalRoomAccess): string | null {
+  return access.activeGuestId ?? null;
 }
 
+/** Guests currently inside (0 or 1) — used for "0/1 guest" display */
+export function getPersonalRoomGuests(access: PersonalRoomAccess): string[] {
+  const guest = access.activeGuestId;
+  return guest ? [guest] : [];
+}
+
+export function isPersonalRoomOccupied(access: PersonalRoomAccess): boolean {
+  return access.activeGuestId != null;
+}
+
+/** @deprecated use isPersonalRoomOccupied — kept for call sites meaning "someone is inside" */
 export function isPersonalRoomFull(access: PersonalRoomAccess): boolean {
-  return getPersonalRoomGuests(access).length >= PERSONAL_ROOM_MAX_OCCUPANCY - 1;
+  return isPersonalRoomOccupied(access);
+}
+
+export function isApprovedPersonalGuest(access: PersonalRoomAccess, userId: string): boolean {
+  return userId !== access.ownerId && access.grantedIds.includes(userId);
+}
+
+export function canPhysicallyEnterPersonalRoom(
+  access: PersonalRoomAccess,
+  userId: string
+): boolean {
+  if (userId === access.ownerId) return true;
+  if (!isApprovedPersonalGuest(access, userId)) return false;
+  const active = access.activeGuestId;
+  return active == null || active === userId;
+}
+
+export function isWaitingForPersonalRoomTurn(
+  access: PersonalRoomAccess,
+  userId: string
+): boolean {
+  return (
+    isApprovedPersonalGuest(access, userId) &&
+    access.activeGuestId != null &&
+    access.activeGuestId !== userId
+  );
 }
 
 /** Online or idle counts as "home" for personal room visits */

@@ -1,4 +1,4 @@
-import type { MailboxNote } from "../types";
+import type { MailboxNote } from "../../types";
 
 interface Props {
   note: MailboxNote;

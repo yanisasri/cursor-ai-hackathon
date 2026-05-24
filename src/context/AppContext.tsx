@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   appendMailboxNote,
+  addPersonalRoomPendingRequest,
   createRoomRecord,
   createUser,
   createFriendRequest,
@@ -24,6 +25,7 @@ import {
   getNotifications,
   getMailboxNotes,
   getPersonalRoomAccess,
+  grantPersonalRoomAccessEntry,
   getPolls,
   getRoomInvites,
   getRoomNameChangeRequests,
@@ -37,7 +39,9 @@ import {
   leaveRoom as leaveRoomRecord,
   proposeRoomNameChange,
   removeFriendship,
+  removePersonalRoomPendingRequest,
   respondFriendRequest as respondFriendRequestDb,
+  revokePersonalRoomGuest,
   respondRoomInvite,
   respondRoomNameChange as respondRoomNameChangeDb,
   saveCalendarConnections,
@@ -46,23 +50,24 @@ import {
   saveDecisionOptions,
   saveNicknameRequests,
   saveNotifications,
-  savePersonalRoomAccess,
   savePolls,
   saveRoomNicknames,
   saveSuggestions,
   saveSuggestionCategoriesByRoom,
+  setPersonalRoomActiveGuest,
   setSessionUserId,
   setUserPresence,
   updateMailboxNoteRead,
   upsertUserAvatars,
   verifyCredentials,
 } from "../lib/storage";
+import { mergePersonalRoomAccessLists } from "../lib/personalRoomAccessMerge";
 import {
   MAX_ROOM_MEMBERS,
   SUGGESTION_CATEGORIES,
   countMailboxWords,
-  getPersonalRoomGuests,
-  isPersonalRoomFull,
+  canPhysicallyEnterPersonalRoom,
+  isApprovedPersonalGuest,
   MAILBOX_MAX_WORDS,
   type AvatarConfig,
   type CalendarConnection,
@@ -149,6 +154,7 @@ interface AppContextValue {
   respondNicknameRequest: (id: string, accept: boolean) => void;
   getRoomDisplayName: (roomId: string, userId: string) => string;
   refresh: () => Promise<void>;
+  refreshPersonalRoomAccess: () => Promise<void>;
   addCalendarSlot: (slot: Omit<CalendarSlot, "id">) => void;
   addCalendarEvent: (event: Omit<CalendarEvent, "id">) => void;
   createCalendarEventRequest: (event: Omit<CalendarEvent, "id">) => void;
@@ -189,6 +195,11 @@ interface AppContextValue {
   grantPersonalRoomAccess: (roomId: string, ownerId: string, userId: string) => { ok: boolean; error?: string };
   denyPersonalRoomAccess: (roomId: string, ownerId: string, userId: string) => void;
   leavePersonalRoom: (roomId: string, ownerId: string) => void;
+  enterPersonalRoomAsGuest: (
+    roomId: string,
+    ownerId: string
+  ) => { ok: boolean; error?: string };
+  isApprovedPersonalRoom: (roomId: string, ownerId: string, userId: string) => boolean;
   canEnterPersonalRoom: (roomId: string, ownerId: string, userId: string) => boolean;
   sendMailboxNote: (input: {
     roomId: string;
@@ -284,7 +295,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setRoomNameChangeRequests(allRoomNameChanges);
     setRoomNicknames(allNicknames);
     setNicknameRequests(allNicknameRequests);
-    setPersonalRoomAccess(allPersonalAccess);
+    setPersonalRoomAccess((prev) => mergePersonalRoomAccessLists(allPersonalAccess, prev));
     setMailboxNotes(allMailboxNotes);
     if (sessionId) {
       const found = allUsers.find((u) => u.id === sessionId) ?? null;
@@ -299,6 +310,46 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  const refreshPersonalRoomAccess = useCallback(async () => {
+    try {
+      const latest = await getPersonalRoomAccess();
+      setPersonalRoomAccess((prev) => mergePersonalRoomAccessLists(latest, prev));
+    } catch {
+      /* keep local state */
+    }
+  }, []);
+
+  const clearPersonalRoomPresenceForUser = useCallback(
+    (userId: string, except?: { roomId: string; ownerId: string }) => {
+      let changed = false;
+      const updated = personalRoomAccess.map((entry) => {
+        if (entry.ownerId === userId) return entry;
+        let next = entry;
+        if (entry.activeGuestId === userId) {
+          next = { ...next, activeGuestId: null };
+          changed = true;
+          void setPersonalRoomActiveGuest(entry.roomId, entry.ownerId, null);
+        }
+        if (
+          entry.grantedIds.includes(userId) &&
+          (!except ||
+            entry.roomId !== except.roomId ||
+            entry.ownerId !== except.ownerId)
+        ) {
+          next = {
+            ...next,
+            grantedIds: next.grantedIds.filter((id) => id !== userId),
+          };
+          changed = true;
+          void revokePersonalRoomGuest(entry.roomId, entry.ownerId, userId);
+        }
+        return next;
+      });
+      if (changed) setPersonalRoomAccess(updated);
+    },
+    [personalRoomAccess]
+  );
 
   /** Best-effort — social notifications use friend/room types that need DB migration. */
   const appendNotifications = useCallback(
@@ -347,11 +398,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(() => {
     if (user) {
+      clearPersonalRoomPresenceForUser(user.id);
       void setUserPresence(user.id, "offline").then(() => loadAll());
     }
     setSessionUserId(null);
     setUser(null);
-  }, [user, loadAll]);
+  }, [user, loadAll, clearPersonalRoomPresenceForUser]);
 
   const updateAvatar = useCallback(
     (avatar: AvatarConfig) => {
@@ -1139,9 +1191,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const setPresence = useCallback(
     (presence: UserPresence) => {
       if (!user) return;
+      if (presence === "offline") {
+        clearPersonalRoomPresenceForUser(user.id);
+      }
       void setUserPresence(user.id, presence).then(() => loadAll());
     },
-    [user, loadAll]
+    [user, loadAll, clearPersonalRoomPresenceForUser]
   );
 
   const toggleOnline = useCallback(
@@ -1192,21 +1247,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (entry.pendingRequests.some((r) => r.userId === user.id)) {
         return { ok: false, error: "Request already pending." };
       }
-      if (isPersonalRoomFull(entry)) {
-        return { ok: false, error: "This personal room is full (owner + 1 guest)." };
-      }
+      const requestedAt = new Date().toISOString();
       const updated = [...all];
       updated[idx] = {
         ...entry,
-        pendingRequests: [
-          ...entry.pendingRequests,
-          { userId: user.id, requestedAt: new Date().toISOString() },
-        ],
+        pendingRequests: [...entry.pendingRequests, { userId: user.id, requestedAt }],
       };
-      void savePersonalRoomAccess(updated).then(() => loadAll());
+      setPersonalRoomAccess(updated);
+      void addPersonalRoomPendingRequest(roomId, ownerId, user.id, requestedAt);
       return { ok: true };
     },
-    [user, personalRoomAccess, loadAll]
+    [user, personalRoomAccess]
   );
 
   const grantPersonalRoomAccess = useCallback(
@@ -1215,20 +1266,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const idx = all.findIndex((a) => a.roomId === roomId && a.ownerId === ownerId);
       if (idx < 0) return { ok: false, error: "Room not found." };
       const entry = all[idx];
-      const guests = getPersonalRoomGuests(entry);
-      if (guests.length >= 1 && !guests.includes(grantUserId)) {
-        return { ok: false, error: "Room is full — only one guest at a time." };
-      }
       const updated = [...all];
       updated[idx] = {
         ...entry,
         grantedIds: [...new Set([...entry.grantedIds, grantUserId])],
         pendingRequests: entry.pendingRequests.filter((r) => r.userId !== grantUserId),
       };
-      void savePersonalRoomAccess(updated).then(() => loadAll());
+      setPersonalRoomAccess(updated);
+      void grantPersonalRoomAccessEntry(roomId, ownerId, grantUserId);
       return { ok: true };
     },
-    [personalRoomAccess, loadAll]
+    [personalRoomAccess]
   );
 
   const denyPersonalRoomAccess = useCallback(
@@ -1242,9 +1290,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ...entry,
         pendingRequests: entry.pendingRequests.filter((r) => r.userId !== denyUserId),
       };
-      void savePersonalRoomAccess(updated).then(() => loadAll());
+      setPersonalRoomAccess(updated);
+      void removePersonalRoomPendingRequest(roomId, ownerId, denyUserId);
     },
-    [personalRoomAccess, loadAll]
+    [personalRoomAccess]
   );
 
   const leavePersonalRoom = useCallback(
@@ -1254,15 +1303,69 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const idx = all.findIndex((a) => a.roomId === roomId && a.ownerId === ownerId);
       if (idx < 0) return;
       const entry = all[idx];
-      if (!entry.grantedIds.includes(user.id)) return;
+      if (entry.activeGuestId !== user.id) return;
       const updated = [...all];
-      updated[idx] = {
-        ...entry,
-        grantedIds: entry.grantedIds.filter((id) => id !== user.id),
-      };
-      void savePersonalRoomAccess(updated).then(() => loadAll());
+      updated[idx] = { ...entry, activeGuestId: null };
+      setPersonalRoomAccess(updated);
+      void setPersonalRoomActiveGuest(roomId, ownerId, null);
     },
-    [user, personalRoomAccess, loadAll]
+    [user, personalRoomAccess]
+  );
+
+  const enterPersonalRoomAsGuest = useCallback(
+    (roomId: string, ownerId: string) => {
+      if (!user) return { ok: false, error: "Not signed in." };
+      if (user.id === ownerId) return { ok: true };
+      const all = personalRoomAccess;
+      const idx = all.findIndex((a) => a.roomId === roomId && a.ownerId === ownerId);
+      if (idx < 0) return { ok: false, error: "Room not found." };
+      const entry = all[idx];
+      if (!isApprovedPersonalGuest(entry, user.id)) {
+        return { ok: false, error: "You need approval to enter." };
+      }
+      if (
+        entry.activeGuestId != null &&
+        entry.activeGuestId !== user.id
+      ) {
+        return { ok: false, error: "Someone else is visiting — wait your turn." };
+      }
+
+      const updated = all.map((a) => {
+        if (a.roomId !== roomId) return a;
+        if (a.ownerId === user.id) return a;
+        if (a.ownerId === ownerId) {
+          return { ...a, activeGuestId: user.id };
+        }
+        if (a.activeGuestId === user.id) {
+          void setPersonalRoomActiveGuest(a.roomId, a.ownerId, null);
+          return { ...a, activeGuestId: null };
+        }
+        if (a.grantedIds.includes(user.id)) {
+          void revokePersonalRoomGuest(a.roomId, a.ownerId, user.id);
+          return {
+            ...a,
+            grantedIds: a.grantedIds.filter((id) => id !== user.id),
+          };
+        }
+        return a;
+      });
+
+      setPersonalRoomAccess(updated);
+      void setPersonalRoomActiveGuest(roomId, ownerId, user.id);
+      return { ok: true };
+    },
+    [user, personalRoomAccess]
+  );
+
+  const isApprovedPersonalRoom = useCallback(
+    (roomId: string, ownerId: string, visitorId: string) => {
+      if (visitorId === ownerId) return true;
+      const entry = personalRoomAccess.find(
+        (a) => a.roomId === roomId && a.ownerId === ownerId
+      );
+      return entry ? isApprovedPersonalGuest(entry, visitorId) : false;
+    },
+    [personalRoomAccess]
   );
 
   const canEnterPersonalRoom = useCallback(
@@ -1271,7 +1374,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const entry = personalRoomAccess.find(
         (a) => a.roomId === roomId && a.ownerId === ownerId
       );
-      return entry?.grantedIds.includes(visitorId) ?? false;
+      return entry ? canPhysicallyEnterPersonalRoom(entry, visitorId) : false;
     },
     [personalRoomAccess]
   );
@@ -1336,6 +1439,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const markMailboxNoteRead = useCallback(
     (noteId: string) => {
+      setMailboxNotes((notes) =>
+        notes.map((n) => (n.id === noteId ? { ...n, read: true } : n))
+      );
       void updateMailboxNoteRead(noteId).then(() => loadAll());
     },
     [loadAll]
@@ -1380,6 +1486,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       respondNicknameRequest,
       getRoomDisplayName,
       refresh: loadAll,
+      refreshPersonalRoomAccess,
       addCalendarSlot,
       addCalendarEvent,
       createCalendarEventRequest,
@@ -1407,6 +1514,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       grantPersonalRoomAccess,
       denyPersonalRoomAccess,
       leavePersonalRoom,
+      enterPersonalRoomAsGuest,
+      isApprovedPersonalRoom,
       canEnterPersonalRoom,
       sendMailboxNote,
       markMailboxNoteRead,
@@ -1450,6 +1559,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       respondNicknameRequest,
       getRoomDisplayName,
       loadAll,
+      refreshPersonalRoomAccess,
       addCalendarSlot,
       addCalendarEvent,
       createCalendarEventRequest,
@@ -1477,6 +1587,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       grantPersonalRoomAccess,
       denyPersonalRoomAccess,
       leavePersonalRoom,
+      enterPersonalRoomAsGuest,
+      isApprovedPersonalRoom,
       canEnterPersonalRoom,
       sendMailboxNote,
       markMailboxNoteRead,

@@ -1099,7 +1099,7 @@ export const supabaseApi = {
       const ownerId = String(a.owner_id);
       const k = key(roomId, ownerId);
       if (!map.has(k)) {
-        map.set(k, { roomId, ownerId, grantedIds: [], pendingRequests: [] });
+        map.set(k, { roomId, ownerId, grantedIds: [], activeGuestId: null, pendingRequests: [] });
       }
       map.get(k)?.grantedIds.push(String(a.granted_user_id));
     }
@@ -1108,7 +1108,13 @@ export const supabaseApi = {
       const ownerId = String(p.owner_id);
       const k = key(roomId, ownerId);
       if (!map.has(k)) {
-        map.set(k, { roomId, ownerId, grantedIds: [ownerId], pendingRequests: [] });
+        map.set(k, {
+          roomId,
+          ownerId,
+          grantedIds: [ownerId],
+          activeGuestId: null,
+          pendingRequests: [],
+        });
       }
       map.get(k)?.pendingRequests.push({
         userId: String(p.requester_user_id),
@@ -1121,7 +1127,49 @@ export const supabaseApi = {
         entry.grantedIds.push(entry.ownerId);
       }
     }
+
+    try {
+      const { data: activeRows, error: activeError } = await supabase
+        .from("personal_room_active_guest")
+        .select("room_id,owner_id,guest_user_id");
+      if (!activeError) {
+        for (const row of activeRows ?? []) {
+          const roomId = String(row.room_id);
+          const ownerId = String(row.owner_id);
+          const k = key(roomId, ownerId);
+          const entry = map.get(k);
+          if (entry) {
+            entry.activeGuestId = row.guest_user_id ? String(row.guest_user_id) : null;
+          }
+        }
+      }
+    } catch {
+      /* table may not exist yet */
+    }
+
     return Array.from(map.values());
+  },
+
+  async setPersonalRoomActiveGuest(
+    roomId: string,
+    ownerId: string,
+    guestUserId: string | null
+  ): Promise<void> {
+    const { error: deleteError } = await supabase
+      .from("personal_room_active_guest")
+      .delete()
+      .eq("room_id", roomId)
+      .eq("owner_id", ownerId);
+    throwIfError(deleteError);
+
+    if (guestUserId) {
+      const { error: insertError } = await supabase.from("personal_room_active_guest").insert({
+        room_id: roomId,
+        owner_id: ownerId,
+        guest_user_id: guestUserId,
+      });
+      throwIfError(insertError);
+    }
   },
 
   async savePersonalRoomAccess(access: PersonalRoomAccess[]): Promise<void> {
@@ -1166,6 +1214,80 @@ export const supabaseApi = {
         .insert(pendingRows);
       throwIfError(insertPendingError);
     }
+  },
+
+  async upsertPersonalRoomPendingRequest(
+    roomId: string,
+    ownerId: string,
+    requesterUserId: string,
+    requestedAt: string
+  ): Promise<void> {
+    const { error: deleteError } = await supabase
+      .from("personal_room_pending_requests")
+      .delete()
+      .eq("room_id", roomId)
+      .eq("owner_id", ownerId)
+      .eq("requester_user_id", requesterUserId);
+    throwIfError(deleteError);
+
+    const { error: insertError } = await supabase.from("personal_room_pending_requests").insert({
+      room_id: roomId,
+      owner_id: ownerId,
+      requester_user_id: requesterUserId,
+      requested_at: requestedAt,
+    });
+    throwIfError(insertError);
+  },
+
+  async deletePersonalRoomPendingRequest(
+    roomId: string,
+    ownerId: string,
+    requesterUserId: string
+  ): Promise<void> {
+    const { error } = await supabase
+      .from("personal_room_pending_requests")
+      .delete()
+      .eq("room_id", roomId)
+      .eq("owner_id", ownerId)
+      .eq("requester_user_id", requesterUserId);
+    throwIfError(error);
+  },
+
+  async insertPersonalRoomGranted(
+    roomId: string,
+    ownerId: string,
+    grantedUserId: string
+  ): Promise<void> {
+    const { data: existing, error: existingError } = await supabase
+      .from("personal_room_access")
+      .select("granted_user_id")
+      .eq("room_id", roomId)
+      .eq("owner_id", ownerId)
+      .eq("granted_user_id", grantedUserId)
+      .maybeSingle();
+    throwIfError(existingError);
+    if (existing) return;
+
+    const { error } = await supabase.from("personal_room_access").insert({
+      room_id: roomId,
+      owner_id: ownerId,
+      granted_user_id: grantedUserId,
+    });
+    throwIfError(error);
+  },
+
+  async removePersonalRoomGranted(
+    roomId: string,
+    ownerId: string,
+    grantedUserId: string
+  ): Promise<void> {
+    const { error } = await supabase
+      .from("personal_room_access")
+      .delete()
+      .eq("room_id", roomId)
+      .eq("owner_id", ownerId)
+      .eq("granted_user_id", grantedUserId);
+    throwIfError(error);
   },
 
   async getRoomInvites(): Promise<RoomInvite[]> {

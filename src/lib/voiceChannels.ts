@@ -18,5 +18,8 @@ export function personalVoiceParticipants(
   accessList: PersonalRoomAccess[]
 ): string[] {
   const access = accessList.find((a) => a.roomId === roomId && a.ownerId === ownerId);
-  return access?.grantedIds.length ? access.grantedIds : [ownerId];
+  if (!access) return [ownerId];
+  const ids = [ownerId];
+  if (access.activeGuestId) ids.push(access.activeGuestId);
+  return ids;
 }
