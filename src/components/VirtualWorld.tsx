@@ -681,7 +681,7 @@ export function VirtualWorld({
             const ownerId = String(z.ownerId ?? "");
             if (!ownerId) return;
             onEnterSubRoom("personal", ownerId);
-            if (user && ownerId !== user.id) {
+            if (user) {
               onPersonalRoomVisit?.(ownerId);
             } else if (user && ownerId === user.id) {
               onOpenOwnMailbox?.();
