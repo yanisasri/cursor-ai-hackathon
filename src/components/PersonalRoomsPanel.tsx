@@ -1,16 +1,29 @@
 import { useEffect, useState } from "react";
 import { useApp } from "../context/AppContext";
+import type { VoiceChatState } from "../hooks/useVoiceChat";
 import {
   getPersonalRoomGuests,
   isPersonalRoomFull,
   PERSONAL_ROOM_MAX_OCCUPANCY,
 } from "../types";
+import { VoiceChatPanel } from "./VoiceChatPanel";
+
+interface VoiceContextProps {
+  channelId: string;
+  allowedParticipantIds: string[];
+  title: string;
+  description: string;
+  unavailableMessage?: string;
+}
 
 interface Props {
   roomId: string;
   memberIds: string[];
   selectedOwnerId?: string | null;
   onSelectOwner?: (ownerId: string | null) => void;
+  voiceContext?: VoiceContextProps | null;
+  voice?: VoiceChatState;
+  participantNames?: Record<string, string>;
 }
 
 export function PersonalRoomsPanel({
@@ -18,6 +31,9 @@ export function PersonalRoomsPanel({
   memberIds,
   selectedOwnerId: selectedOwnerProp,
   onSelectOwner,
+  voiceContext,
+  voice,
+  participantNames = {},
 }: Props) {
   const {
     user,
@@ -196,6 +212,15 @@ export function PersonalRoomsPanel({
             Private 1:1 voice chat space — max {PERSONAL_ROOM_MAX_OCCUPANCY} people (owner + one
             guest).
           </p>
+          {voice && voiceContext && canEnterPersonalRoom(roomId, selectedOwner, user.id) && (
+            <VoiceChatPanel
+              title={voiceContext.title}
+              description={voiceContext.description}
+              participantNames={participantNames}
+              voice={voice}
+              compact
+            />
+          )}
           <button
             type="button"
             className="btn-secondary mt-3 text-sm"
