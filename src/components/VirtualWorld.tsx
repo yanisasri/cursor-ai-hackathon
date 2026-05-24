@@ -20,17 +20,17 @@ interface Player {
   name: string;
 }
 
-const WORLD_W = 640;
-const BASE_WORLD_H = 480;
+export const WORLD_W = 640;
+export const BASE_WORLD_H = 480;
 const SPEED = 3.5;
 
-const PERSONAL_COLS = 4;
-const PERSONAL_ZONE_W = 130;
-const PERSONAL_ZONE_H = 74;
-const PERSONAL_GAP = 10;
-const PERSONAL_START_Y = 306;
+export const PERSONAL_COLS = 4;
+export const PERSONAL_ZONE_W = 130;
+export const PERSONAL_ZONE_H = 74;
+export const PERSONAL_GAP = 10;
+export const PERSONAL_START_Y = 306;
 
-const CORRIDOR_AVATAR_SLOTS = [
+export const CORRIDOR_AVATAR_SLOTS = [
   { x: 170, y: 268 },
   { x: 250, y: 268 },
   { x: 330, y: 268 },
@@ -91,7 +91,7 @@ function zoneCenter(z: { x: number; y: number; w: number; h: number }) {
 }
 
 // ─── SVG patterns & filters (house area only) ─────────────────────────────────
-function HouseDefs() {
+export function HouseDefs() {
   return (
     <defs>
       {/* Main corridor – warm mid-brown planks */}
@@ -126,7 +126,7 @@ function HouseDefs() {
 }
 
 // ─── Static house rooms + corridor ────────────────────────────────────────────
-function HouseStaticRooms({ worldH }: { worldH: number }) {
+export function HouseStaticRooms({ worldH }: { worldH: number }) {
   const innerH = worldH - 20;
   return (
     <>
@@ -388,7 +388,7 @@ function HouseStaticRooms({ worldH }: { worldH: number }) {
 }
 
 // ─── Personal room SVG (drawn once per member) ────────────────────────────────
-function PersonalRoomSVG({
+export function PersonalRoomSVG({
   x,
   y,
   w,
