@@ -570,8 +570,6 @@ export function VirtualWorld({
   const [pos, setPos] = useState(DEFAULT_SPAWN);
   const posRef = useRef(DEFAULT_SPAWN);
   const [target, setTarget] = useState<{ x: number; y: number } | null>(null);
-  const [others, setOthers] = useState<Player[]>([]);
-  const [personalPromptOwnerId, setPersonalPromptOwnerId] = useState<string | null>(null);
   const heldKeysRef = useHeldKeys(true);
   const lastZoneRef = useRef<string | null>(null);
   const leaveZoneTimerRef = useRef<number | null>(null);
