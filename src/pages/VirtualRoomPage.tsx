@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { CalendarPanel } from "../components/CalendarPanel";
 import { ChatPanel } from "../components/ChatPanel";
@@ -6,6 +6,10 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DecisionRoomPanel } from "../components/decision/DecisionRoomPanel";
 import { Navbar } from "../components/Navbar";
 import { PersonalRoomsPanel } from "../components/PersonalRoomsPanel";
+import { PersonalRoomAccessAlerts } from "../components/PersonalRoomAccessAlerts";
+import { PersonalRoomVisitPanel } from "../components/PersonalRoomVisitPanel";
+import { MailboxNoteComposer } from "../components/mailbox/MailboxNoteComposer";
+import { MailboxSendAnimation } from "../components/mailbox/MailboxSendAnimation";
 import { RoomNicknamesPanel } from "../components/RoomNicknamesPanel";
 import { RoomSettingsPanel } from "../components/RoomSettingsPanel";
 import { SuggestionsPanel } from "../components/SuggestionsPanel";
@@ -19,6 +23,7 @@ import {
   personalVoiceChannelId,
   personalVoiceParticipants,
 } from "../lib/voiceChannels";
+import { playDoorbellSound } from "../lib/doorbellSound";
 import { SUB_ROOMS, type SubRoomType } from "../types";
 
 export function VirtualRoomPage() {
@@ -33,9 +38,21 @@ export function VirtualRoomPage() {
     leaveRoom,
     getRoomDisplayName,
     canEnterPersonalRoom,
+    refresh,
+    requestPersonalRoomAccess,
+    sendMailboxNote,
+    mailboxNotes,
   } = useApp();
   const [activeSubRoom, setActiveSubRoom] = useState<SubRoomType>("living");
   const [activePersonalOwner, setActivePersonalOwner] = useState<string | null>(null);
+  const [sidebarVisitOwnerId, setSidebarVisitOwnerId] = useState<string | null>(null);
+  const visitPinnedRef = useRef(false);
+  const hoverSidebarTimerRef = useRef<number | null>(null);
+  const [mailboxComposeOwnerId, setMailboxComposeOwnerId] = useState<string | null>(null);
+  const [mailboxAnimation, setMailboxAnimation] = useState({
+    active: false,
+    envelopeColor: "#c4a574",
+  });
   const [panelOpen, setPanelOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
@@ -44,6 +61,31 @@ export function VirtualRoomPage() {
   useEffect(() => {
     if (roomId) ensureRoomSetup(roomId);
   }, [roomId, ensureRoomSetup]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      void refresh();
+    }, 4000);
+    return () => window.clearInterval(interval);
+  }, [refresh]);
+
+  const seenMailboxRef = useRef<Set<string>>(new Set());
+  const mailboxSeededRef = useRef(false);
+
+  useEffect(() => {
+    if (!user || !roomId) return;
+    const mine = mailboxNotes.filter((n) => n.roomId === roomId && n.ownerId === user.id);
+    if (!mailboxSeededRef.current) {
+      mine.forEach((n) => seenMailboxRef.current.add(n.id));
+      mailboxSeededRef.current = true;
+      return;
+    }
+    for (const note of mine) {
+      if (seenMailboxRef.current.has(note.id)) continue;
+      seenMailboxRef.current.add(note.id);
+      if (!note.read) playDoorbellSound();
+    }
+  }, [mailboxNotes, roomId, user]);
 
   const room = rooms.find((r) => r.id === roomId);
 
@@ -121,6 +163,22 @@ export function VirtualRoomPage() {
     allowedParticipantIds: voiceContext?.allowedParticipantIds ?? [],
   });
 
+  const myUnreadMailboxCount = useMemo(() => {
+    if (!user || !room) return 0;
+    return mailboxNotes.filter(
+      (n) => n.roomId === room.id && n.ownerId === user.id && !n.read
+    ).length;
+  }, [mailboxNotes, room, user]);
+
+  const clearHoverSidebarTimer = () => {
+    if (hoverSidebarTimerRef.current != null) {
+      window.clearTimeout(hoverSidebarTimerRef.current);
+      hoverSidebarTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => () => clearHoverSidebarTimer(), []);
+
   if (!user) return <Navigate to="/sign-in" replace />;
 
   if (!room || !room.memberIds.includes(user.id)) {
@@ -138,8 +196,59 @@ export function VirtualRoomPage() {
   }
 
   const subMeta = SUB_ROOMS.find((s) => s.id === activeSubRoom);
-
   const willDeleteRoom = room.memberIds.length <= 2;
+
+  const mailboxRecipientName = mailboxComposeOwnerId
+    ? getRoomDisplayName(room.id, mailboxComposeOwnerId) ||
+      users.find((u) => u.id === mailboxComposeOwnerId)?.displayName ||
+      "Friend"
+    : "";
+
+  const handleRingDoorbell = (ownerId: string) => {
+    visitPinnedRef.current = true;
+    clearHoverSidebarTimer();
+    setSidebarVisitOwnerId(ownerId);
+    setActiveSubRoom("personal");
+    setActivePersonalOwner(ownerId);
+    setPanelOpen(true);
+    const result = requestPersonalRoomAccess(room.id, ownerId);
+    if (result.ok) playDoorbellSound();
+    else if (result.error) alert(result.error);
+  };
+
+  const handlePersonalRoomVisit = (ownerId: string) => {
+    visitPinnedRef.current = true;
+    clearHoverSidebarTimer();
+    setSidebarVisitOwnerId(ownerId);
+    setActiveSubRoom("personal");
+    setActivePersonalOwner(ownerId);
+    setPanelOpen(true);
+    setSettingsOpen(false);
+  };
+
+  const handlePersonalRoomHover = (ownerId: string) => {
+    clearHoverSidebarTimer();
+    if (!visitPinnedRef.current) setSidebarVisitOwnerId(ownerId);
+    setPanelOpen(true);
+    setSettingsOpen(false);
+  };
+
+  const handlePersonalRoomHoverEnd = () => {
+    clearHoverSidebarTimer();
+    hoverSidebarTimerRef.current = window.setTimeout(() => {
+      if (!visitPinnedRef.current) setSidebarVisitOwnerId(null);
+    }, 400);
+  };
+
+  const handleClearPersonalRoomVisit = () => {
+    visitPinnedRef.current = false;
+    setSidebarVisitOwnerId(null);
+  };
+
+  const dismissSidebarVisit = () => {
+    visitPinnedRef.current = false;
+    setSidebarVisitOwnerId(null);
+  };
 
   const confirmLeaveRoom = async () => {
     setLeaving(true);
@@ -169,6 +278,12 @@ export function VirtualRoomPage() {
             voiceContext={voiceContext}
             voice={voice}
             participantNames={participantNames}
+            onOpenMailboxCompose={(ownerId) => {
+              setMailboxComposeOwnerId(ownerId);
+              setPanelOpen(true);
+              setSettingsOpen(false);
+            }}
+            onRingDoorbell={handleRingDoorbell}
           />
         );
       default:
@@ -259,6 +374,10 @@ export function VirtualRoomPage() {
                 setPanelOpen(true);
                 setSettingsOpen(false);
               }}
+              onPersonalRoomVisit={handlePersonalRoomVisit}
+              onClearPersonalRoomVisit={handleClearPersonalRoomVisit}
+              onPersonalRoomHover={handlePersonalRoomHover}
+              onPersonalRoomHoverEnd={handlePersonalRoomHoverEnd}
               voiceContext={
                 voiceContext && !voiceContext.unavailableMessage
                   ? {
@@ -298,12 +417,90 @@ export function VirtualRoomPage() {
                   </div>
                 </div>
               ) : (
-                renderPanel()
+                <>
+                  {myUnreadMailboxCount > 0 && (
+                    <div className="mb-3 rounded-xl border-2 border-sky-300 bg-sky-50 p-3">
+                      <p className="text-sm font-semibold text-cozy-900">
+                        📬 {myUnreadMailboxCount} new note
+                        {myUnreadMailboxCount === 1 ? "" : "s"} in your mailbox
+                      </p>
+                      <button
+                        type="button"
+                        className="btn-primary mt-2 text-xs"
+                        onClick={() => {
+                          setActiveSubRoom("personal");
+                          setActivePersonalOwner(user.id);
+                          setPanelOpen(true);
+                        }}
+                      >
+                        Open mailbox
+                      </button>
+                    </div>
+                  )}
+                  <div
+                    onMouseEnter={clearHoverSidebarTimer}
+                    onMouseLeave={handlePersonalRoomHoverEnd}
+                  >
+                    {sidebarVisitOwnerId && sidebarVisitOwnerId !== user.id && (
+                      <PersonalRoomVisitPanel
+                        roomId={room.id}
+                        ownerId={sidebarVisitOwnerId}
+                        onDismiss={dismissSidebarVisit}
+                        onOpenMailboxCompose={(ownerId) => {
+                          visitPinnedRef.current = true;
+                          setMailboxComposeOwnerId(ownerId);
+                          setPanelOpen(true);
+                          setSettingsOpen(false);
+                        }}
+                        onRingDoorbell={handleRingDoorbell}
+                      />
+                    )}
+                    <PersonalRoomAccessAlerts roomId={room.id} />
+                  </div>
+                  {mailboxComposeOwnerId && (
+                    <>
+                      {mailboxComposeOwnerId !== user.id && (
+                        <p className="mb-2 text-xs font-medium text-sky-700">
+                          Writing to {mailboxRecipientName}&apos;s mailbox
+                        </p>
+                      )}
+                      <div className="mb-3">
+                        <MailboxNoteComposer
+                          recipientName={mailboxRecipientName}
+                          onCancel={() => setMailboxComposeOwnerId(null)}
+                          onSend={async (payload) => {
+                            const result = await sendMailboxNote({
+                              roomId: room.id,
+                              ownerId: mailboxComposeOwnerId,
+                              ...payload,
+                            });
+                            if (result.ok) {
+                              playDoorbellSound();
+                              setMailboxAnimation({
+                                active: true,
+                                envelopeColor: payload.envelopeColor,
+                              });
+                              setMailboxComposeOwnerId(null);
+                            }
+                            return result;
+                          }}
+                        />
+                      </div>
+                    </>
+                  )}
+                  {renderPanel()}
+                </>
               )}
             </div>
           </div>
         </div>
       </main>
+
+      <MailboxSendAnimation
+        active={mailboxAnimation.active}
+        envelopeColor={mailboxAnimation.envelopeColor}
+        onComplete={() => setMailboxAnimation((s) => ({ ...s, active: false }))}
+      />
 
       <ConfirmDialog
         open={leaveConfirmOpen}

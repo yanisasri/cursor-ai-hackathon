@@ -1,12 +1,18 @@
 import { useEffect, useState } from "react";
 import { useApp } from "../context/AppContext";
+import { playDoorbellSound } from "../lib/doorbellSound";
 import type { VoiceChatState } from "../hooks/useVoiceChat";
 import {
   getPersonalRoomGuests,
   isPersonalRoomFull,
+  isUserAtHome,
   PERSONAL_ROOM_MAX_OCCUPANCY,
+  presenceDotClass,
+  presenceLabel,
 } from "../types";
 import { VoiceChatPanel } from "./VoiceChatPanel";
+import { PersonalRoomExternalMailbox } from "./mailbox/PersonalRoomExternalMailbox";
+import { MailboxInboxPanel } from "./mailbox/MailboxInboxPanel";
 
 interface VoiceContextProps {
   channelId: string;
@@ -24,6 +30,8 @@ interface Props {
   voiceContext?: VoiceContextProps | null;
   voice?: VoiceChatState;
   participantNames?: Record<string, string>;
+  onOpenMailboxCompose?: (ownerId: string) => void;
+  onRingDoorbell?: (ownerId: string) => void;
 }
 
 export function PersonalRoomsPanel({
@@ -34,6 +42,8 @@ export function PersonalRoomsPanel({
   voiceContext,
   voice,
   participantNames = {},
+  onOpenMailboxCompose,
+  onRingDoorbell,
 }: Props) {
   const {
     user,
@@ -43,6 +53,7 @@ export function PersonalRoomsPanel({
     requestPersonalRoomAccess,
     grantPersonalRoomAccess,
     leavePersonalRoom,
+    denyPersonalRoomAccess,
     canEnterPersonalRoom,
   } = useApp();
   const [selectedOwnerLocal, setSelectedOwnerLocal] = useState<string | null>(null);
@@ -84,6 +95,8 @@ export function PersonalRoomsPanel({
               : null;
           const displayName = getRoomDisplayName(roomId, memberId);
           const username = users.find((u) => u.id === memberId)?.displayName ?? "Friend";
+          const memberUser = users.find((u) => u.id === memberId);
+          const memberAtHome = memberUser ? isUserAtHome(memberUser.presence) : false;
 
           return (
             <div
@@ -106,8 +119,18 @@ export function PersonalRoomsPanel({
                         ? "Request pending"
                         : full
                           ? "Room full (owner + guest)"
-                          : "Request access to enter"}
+                          : memberAtHome
+                            ? "Home — ring doorbell to visit"
+                            : "Away — leave a note in their mailbox"}
                 </p>
+                {!isOwner && memberUser && (
+                  <p className="mt-1 flex items-center gap-1 text-[10px] text-cozy-500">
+                    <span
+                      className={`inline-block h-1.5 w-1.5 rounded-full ${presenceDotClass(memberUser.presence)}`}
+                    />
+                    {memberAtHome ? "Home" : "Away"} · {presenceLabel(memberUser.presence)}
+                  </p>
+                )}
                 {access && (
                   <p className="mt-0.5 text-[10px] text-cozy-400">
                     {guests.length}/{PERSONAL_ROOM_MAX_OCCUPANCY - 1} guest
@@ -131,21 +154,30 @@ export function PersonalRoomsPanel({
                         className="flex items-center justify-between rounded-lg bg-cozy-100 px-2 py-1 text-sm"
                       >
                         <span>{requesterName}</span>
-                        <button
-                          type="button"
-                          className="rounded bg-plum-600 px-2 py-0.5 text-xs text-white disabled:opacity-50"
-                          disabled={full && !guests.includes(req.userId)}
-                          onClick={() => {
-                            const result = grantPersonalRoomAccess(
-                              roomId,
-                              memberId,
-                              req.userId
-                            );
-                            if (!result.ok) alert(result.error);
-                          }}
-                        >
-                          Allow
-                        </button>
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
+                            className="rounded bg-plum-600 px-2 py-0.5 text-xs text-white disabled:opacity-50"
+                            disabled={full && !guests.includes(req.userId)}
+                            onClick={() => {
+                              const result = grantPersonalRoomAccess(
+                                roomId,
+                                memberId,
+                                req.userId
+                              );
+                              if (!result.ok) alert(result.error);
+                            }}
+                          >
+                            Allow
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded border border-cozy-300 bg-white px-2 py-0.5 text-xs text-cozy-800"
+                            onClick={() => denyPersonalRoomAccess(roomId, memberId, req.userId)}
+                          >
+                            Deny
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
@@ -171,16 +203,25 @@ export function PersonalRoomsPanel({
                     <p className="text-center text-sm text-cozy-500">Request pending…</p>
                   ) : full ? (
                     <p className="text-center text-sm text-cozy-500">Room is full</p>
-                  ) : (
+                  ) : memberAtHome ? (
                     <button
                       type="button"
                       className="btn-secondary w-full text-sm"
                       onClick={() => {
                         const result = requestPersonalRoomAccess(roomId, memberId);
-                        if (!result.ok && result.error) alert(result.error);
+                        if (result.ok) playDoorbellSound();
+                        else if (result.error) alert(result.error);
                       }}
                     >
-                      Request to enter
+                      Ring doorbell
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn-secondary w-full text-sm"
+                      onClick={() => onOpenMailboxCompose?.(memberId)}
+                    >
+                      Leave a note
                     </button>
                   )}
                 </div>
@@ -203,15 +244,54 @@ export function PersonalRoomsPanel({
       {selectedOwner && user && (
         <div className="card mt-2">
           <p className="font-medium">
-            Inside {getRoomDisplayName(roomId, selectedOwner)}&apos;s personal room
+            {selectedOwner === user.id
+              ? "Your personal room"
+              : `Visiting ${getRoomDisplayName(roomId, selectedOwner)}'s room`}
           </p>
           <p className="mt-1 text-xs text-cozy-500">
             @{users.find((u) => u.id === selectedOwner)?.displayName ?? "Friend"}
           </p>
-          <p className="mt-2 text-sm text-cozy-600">
-            Private 1:1 voice chat space — max {PERSONAL_ROOM_MAX_OCCUPANCY} people (owner + one
-            guest).
-          </p>
+
+          {selectedOwner === user.id ? (
+            <>
+              <p className="mt-2 text-sm text-cozy-600">
+                Private 1:1 voice chat — max {PERSONAL_ROOM_MAX_OCCUPANCY} people (owner + one
+                guest).
+              </p>
+              <MailboxInboxPanel roomId={roomId} ownerId={user.id} />
+            </>
+          ) : (
+            (() => {
+              const host = users.find((u) => u.id === selectedOwner);
+              if (!host) return null;
+              const canEnter = canEnterPersonalRoom(roomId, selectedOwner, user.id);
+              const pending = personalRoomAccess
+                .find((a) => a.roomId === roomId && a.ownerId === selectedOwner)
+                ?.pendingRequests.some((r) => r.userId === user.id);
+              return (
+                <>
+                  {!canEnter && !pending && (
+                    <div className="mt-3">
+                      <PersonalRoomExternalMailbox
+                        ownerName={getRoomDisplayName(roomId, selectedOwner)}
+                        username={host.displayName}
+                        presence={host.presence}
+                        canRing
+                        compact
+                        onLeaveNote={() => onOpenMailboxCompose?.(selectedOwner)}
+                        onRingDoorbell={() => onRingDoorbell?.(selectedOwner)}
+                      />
+                    </div>
+                  )}
+                  {canEnter && (
+                    <p className="mt-2 text-sm text-cozy-600">
+                      You have access — private 1:1 voice chat available below.
+                    </p>
+                  )}
+                </>
+              );
+            })()
+          )}
           {voice && voiceContext && canEnterPersonalRoom(roomId, selectedOwner, user.id) && (
             <VoiceChatPanel
               title={voiceContext.title}

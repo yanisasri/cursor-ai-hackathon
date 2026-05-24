@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  appendMailboxNote,
   createRoomRecord,
   createUser,
   createFriendRequest,
@@ -21,6 +22,7 @@ import {
   getFriendRequests,
   getNicknameRequests,
   getNotifications,
+  getMailboxNotes,
   getPersonalRoomAccess,
   getPolls,
   getRoomInvites,
@@ -51,19 +53,23 @@ import {
   saveSuggestionCategoriesByRoom,
   setSessionUserId,
   setUserPresence,
+  updateMailboxNoteRead,
   upsertUserAvatars,
   verifyCredentials,
 } from "../lib/storage";
 import {
   MAX_ROOM_MEMBERS,
   SUGGESTION_CATEGORIES,
+  countMailboxWords,
   getPersonalRoomGuests,
   isPersonalRoomFull,
+  MAILBOX_MAX_WORDS,
   type AvatarConfig,
   type CalendarConnection,
   type CalendarEvent,
   type CalendarSlot,
   type FriendRequest,
+  type MailboxNote,
   type NicknameRequest,
   type Notification,
   type PersonalRoomAccess,
@@ -98,6 +104,7 @@ interface AppContextValue {
   roomNicknames: RoomNickname[];
   nicknameRequests: NicknameRequest[];
   personalRoomAccess: PersonalRoomAccess[];
+  mailboxNotes: MailboxNote[];
   signUp: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   signIn: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   signOut: () => void;
@@ -180,8 +187,19 @@ interface AppContextValue {
   toggleOnline: (online: boolean) => void;
   requestPersonalRoomAccess: (roomId: string, ownerId: string) => { ok: boolean; error?: string };
   grantPersonalRoomAccess: (roomId: string, ownerId: string, userId: string) => { ok: boolean; error?: string };
+  denyPersonalRoomAccess: (roomId: string, ownerId: string, userId: string) => void;
   leavePersonalRoom: (roomId: string, ownerId: string) => void;
   canEnterPersonalRoom: (roomId: string, ownerId: string, userId: string) => boolean;
+  sendMailboxNote: (input: {
+    roomId: string;
+    ownerId: string;
+    body: string;
+    paperColor: string;
+    envelopeColor: string;
+    stickers: string[];
+    inReplyToId?: string | null;
+  }) => Promise<{ ok: boolean; error?: string }>;
+  markMailboxNoteRead: (noteId: string) => void;
   ensureRoomSetup: (roomId: string) => void;
 }
 
@@ -211,6 +229,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [roomNicknames, setRoomNicknames] = useState<RoomNickname[]>([]);
   const [nicknameRequests, setNicknameRequests] = useState<NicknameRequest[]>([]);
   const [personalRoomAccess, setPersonalRoomAccess] = useState<PersonalRoomAccess[]>([]);
+  const [mailboxNotes, setMailboxNotes] = useState<MailboxNote[]>([]);
 
   const loadAll = useCallback(async () => {
     const sessionId = getSessionUserId();
@@ -230,6 +249,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       allNicknames,
       allNicknameRequests,
       allPersonalAccess,
+      allMailboxNotes,
     ] = await Promise.all([
       getUsers(),
       getRooms(),
@@ -246,6 +266,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       getRoomNicknames(),
       getNicknameRequests(),
       getPersonalRoomAccess(),
+      getMailboxNotes(),
     ]);
 
     setUsers(allUsers);
@@ -264,6 +285,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setRoomNicknames(allNicknames);
     setNicknameRequests(allNicknameRequests);
     setPersonalRoomAccess(allPersonalAccess);
+    setMailboxNotes(allMailboxNotes);
     if (sessionId) {
       const found = allUsers.find((u) => u.id === sessionId) ?? null;
       const latestUsers = await getUsers();
@@ -1209,6 +1231,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [personalRoomAccess, loadAll]
   );
 
+  const denyPersonalRoomAccess = useCallback(
+    (roomId: string, ownerId: string, denyUserId: string) => {
+      const all = personalRoomAccess;
+      const idx = all.findIndex((a) => a.roomId === roomId && a.ownerId === ownerId);
+      if (idx < 0) return;
+      const entry = all[idx];
+      const updated = [...all];
+      updated[idx] = {
+        ...entry,
+        pendingRequests: entry.pendingRequests.filter((r) => r.userId !== denyUserId),
+      };
+      void savePersonalRoomAccess(updated).then(() => loadAll());
+    },
+    [personalRoomAccess, loadAll]
+  );
+
   const leavePersonalRoom = useCallback(
     (roomId: string, ownerId: string) => {
       if (!user || user.id === ownerId) return;
@@ -1238,6 +1276,71 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [personalRoomAccess]
   );
 
+  const sendMailboxNote = useCallback(
+    async (input: {
+      roomId: string;
+      ownerId: string;
+      body: string;
+      paperColor: string;
+      envelopeColor: string;
+      stickers: string[];
+      inReplyToId?: string | null;
+    }) => {
+      if (!user) return { ok: false, error: "Not signed in." };
+      if (user.id === input.ownerId) {
+        return { ok: false, error: "You cannot mail yourself." };
+      }
+      const words = countMailboxWords(input.body);
+      if (words === 0) return { ok: false, error: "Write something first." };
+      if (words > MAILBOX_MAX_WORDS) {
+        return { ok: false, error: `Notes are limited to ${MAILBOX_MAX_WORDS} words.` };
+      }
+
+      const note: MailboxNote = {
+        id: generateId(),
+        roomId: input.roomId,
+        ownerId: input.ownerId,
+        fromUserId: user.id,
+        body: input.body.trim(),
+        paperColor: input.paperColor,
+        envelopeColor: input.envelopeColor,
+        stickers: input.stickers,
+        read: false,
+        inReplyToId: input.inReplyToId ?? null,
+        createdAt: new Date().toISOString(),
+      };
+
+      try {
+        await appendMailboxNote(note);
+        const senderName = user.displayName;
+        await appendNotifications([
+          {
+            id: generateId(),
+            userId: input.ownerId,
+            type: "room",
+            title: "New mailbox note",
+            message: `${senderName} left a note at your personal room door.`,
+            read: false,
+            createdAt: note.createdAt,
+          },
+        ]);
+        await loadAll();
+        return { ok: true };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Could not send note.";
+        return { ok: false, error: message };
+      }
+    },
+    [user, appendNotifications, loadAll]
+  );
+
+  const markMailboxNoteRead = useCallback(
+    (noteId: string) => {
+      void updateMailboxNoteRead(noteId).then(() => loadAll());
+    },
+    [loadAll]
+  );
+
   const value = useMemo(
     () => ({
       user,
@@ -1257,6 +1360,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       roomNicknames,
       nicknameRequests,
       personalRoomAccess,
+      mailboxNotes,
       signUp,
       signIn,
       signOut,
@@ -1301,8 +1405,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toggleOnline,
       requestPersonalRoomAccess,
       grantPersonalRoomAccess,
+      denyPersonalRoomAccess,
       leavePersonalRoom,
       canEnterPersonalRoom,
+      sendMailboxNote,
+      markMailboxNoteRead,
       ensureRoomSetup,
     }),
     [
@@ -1323,6 +1430,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       roomNicknames,
       nicknameRequests,
       personalRoomAccess,
+      mailboxNotes,
       signUp,
       signIn,
       signOut,
@@ -1367,8 +1475,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toggleOnline,
       requestPersonalRoomAccess,
       grantPersonalRoomAccess,
+      denyPersonalRoomAccess,
       leavePersonalRoom,
       canEnterPersonalRoom,
+      sendMailboxNote,
+      markMailboxNoteRead,
       ensureRoomSetup,
     ]
   );
