@@ -9,12 +9,13 @@ import { RoomNicknamesPanel } from "../components/RoomNicknamesPanel";
 import { SuggestionsPanel } from "../components/SuggestionsPanel";
 import { VirtualWorld } from "../components/VirtualWorld";
 import { useApp } from "../context/AppContext";
-import { MAX_ROOM_MEMBERS, SUB_ROOMS, type SubRoomType } from "../types";
+import { SUB_ROOMS, type SubRoomType } from "../types";
 
 export function VirtualRoomPage() {
   const { roomId } = useParams<{ roomId: string }>();
   const { user, rooms, ensureRoomSetup } = useApp();
   const [activeSubRoom, setActiveSubRoom] = useState<SubRoomType>("living");
+  const [activePersonalOwner, setActivePersonalOwner] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -25,13 +26,9 @@ export function VirtualRoomPage() {
   const room = rooms.find((r) => r.id === roomId);
 
   const displayMemberIds = useMemo(() => {
-    if (!room || !user) return [];
-    const ids = new Set(room.memberIds);
-    user.friendIds.forEach((fid) => {
-      if (ids.size < MAX_ROOM_MEMBERS) ids.add(fid);
-    });
-    return Array.from(ids);
-  }, [room, user]);
+    if (!room) return [];
+    return room.memberIds;
+  }, [room]);
 
   if (!user) return <Navigate to="/sign-in" replace />;
 
@@ -60,7 +57,14 @@ export function VirtualRoomPage() {
       case "suggestions":
         return <SuggestionsPanel roomId={room.id} />;
       case "personal":
-        return <PersonalRoomsPanel roomId={room.id} memberIds={displayMemberIds} />;
+        return (
+          <PersonalRoomsPanel
+            roomId={room.id}
+            memberIds={displayMemberIds}
+            selectedOwnerId={activePersonalOwner}
+            onSelectOwner={setActivePersonalOwner}
+          />
+        );
       default:
         return (
           <div className="p-4">
@@ -127,8 +131,10 @@ export function VirtualRoomPage() {
               memberIds={displayMemberIds}
               area={room.area}
               activeSubRoom={activeSubRoom}
-              onEnterSubRoom={(zone) => {
+              activePersonalOwner={activePersonalOwner}
+              onEnterSubRoom={(zone, ownerId) => {
                 setActiveSubRoom(zone);
+                setActivePersonalOwner(zone === "personal" ? ownerId ?? null : null);
                 setPanelOpen(true);
                 setSettingsOpen(false);
               }}
