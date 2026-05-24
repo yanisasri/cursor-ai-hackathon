@@ -13,22 +13,11 @@ import type {
   VirtualRoom,
 } from "../types";
 import { ARCHIVE_DAYS, DEFAULT_AVATAR } from "../types";
+import { supabaseApi } from "./supabaseApi";
 
 const KEYS = {
-  users: "hangout_users",
   session: "hangout_session",
-  rooms: "hangout_rooms",
   calendar: "hangout_calendar",
-  calendarEvents: "hangout_calendar_events",
-  calendarConnections: "hangout_calendar_connections",
-  polls: "hangout_polls",
-  suggestions: "hangout_suggestions",
-  notifications: "hangout_notifications",
-  messages: "hangout_messages",
-  nicknames: "hangout_room_nicknames",
-  nicknameRequests: "hangout_nickname_requests",
-  personalAccess: "hangout_personal_access",
-  suggestionCategories: "hangout_suggestion_categories",
 } as const;
 
 function read<T>(key: string, fallback: T): T {
@@ -44,24 +33,19 @@ function write<T>(key: string, value: T): void {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
-export function getUsers(): User[] {
-  return migrateUsers(read<User[]>(KEYS.users, []));
+async function sha256(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
-function migrateUsers(users: User[]): User[] {
-  return users.map((u) => ({
-    ...u,
-    avatar: {
-      ...DEFAULT_AVATAR,
-      ...u.avatar,
-      accessory: u.avatar?.accessory ?? "none",
-      skinTone: u.avatar?.skinTone ?? "#f5d0b5",
-    },
-  }));
-}
-
-export function saveUsers(users: User[]): void {
-  write(KEYS.users, users);
+export function generateId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
 export function getSessionUserId(): string | null {
@@ -73,12 +57,24 @@ export function setSessionUserId(id: string | null): void {
   else localStorage.removeItem(KEYS.session);
 }
 
-export function getRooms(): VirtualRoom[] {
-  return read<VirtualRoom[]>(KEYS.rooms, []);
+export async function getUsers(): Promise<User[]> {
+  return supabaseApi.getUsers();
 }
 
-export function saveRooms(rooms: VirtualRoom[]): void {
-  write(KEYS.rooms, rooms);
+export async function saveUsers(users: User[]): Promise<void> {
+  await supabaseApi.saveUsers(users);
+}
+
+export async function getRooms(): Promise<VirtualRoom[]> {
+  return supabaseApi.getRooms();
+}
+
+export async function saveRooms(rooms: VirtualRoom[]): Promise<void> {
+  await supabaseApi.saveRooms(rooms);
+}
+
+export async function createRoomRecord(room: VirtualRoom): Promise<void> {
+  await supabaseApi.createRoom(room);
 }
 
 export function getCalendarSlots(): CalendarSlot[] {
@@ -89,48 +85,38 @@ export function saveCalendarSlots(slots: CalendarSlot[]): void {
   write(KEYS.calendar, slots);
 }
 
-export function getCalendarEvents(): CalendarEvent[] {
-  return read<CalendarEvent[]>(KEYS.calendarEvents, []).map((e) => ({
-    ...e,
-    status: e.status ?? "confirmed",
-    rsvpUserIds: e.rsvpUserIds ?? [],
-    syncedToGoogleUserIds: e.syncedToGoogleUserIds ?? [],
-    syncedToAppleUserIds: e.syncedToAppleUserIds ?? [],
-  }));
+export async function getCalendarEvents(): Promise<CalendarEvent[]> {
+  return supabaseApi.getCalendarEvents();
 }
 
-export function saveCalendarEvents(events: CalendarEvent[]): void {
-  write(KEYS.calendarEvents, events);
+export async function saveCalendarEvents(events: CalendarEvent[]): Promise<void> {
+  await supabaseApi.saveCalendarEvents(events);
 }
 
-export function getSuggestionCategoriesByRoom(): Record<string, string[]> {
-  return read<Record<string, string[]>>(KEYS.suggestionCategories, {});
+export async function getSuggestionCategoriesByRoom(): Promise<Record<string, string[]>> {
+  return supabaseApi.getSuggestionCategoriesByRoom();
 }
 
-export function saveSuggestionCategoriesByRoom(
+export async function saveSuggestionCategoriesByRoom(
   categoriesByRoom: Record<string, string[]>
-): void {
-  write(KEYS.suggestionCategories, categoriesByRoom);
+): Promise<void> {
+  await supabaseApi.saveSuggestionCategoriesByRoom(categoriesByRoom);
 }
 
-export function getCalendarConnections(): CalendarConnection[] {
-  return read<CalendarConnection[]>(KEYS.calendarConnections, []);
+export async function getCalendarConnections(): Promise<CalendarConnection[]> {
+  return supabaseApi.getCalendarConnections();
 }
 
-export function saveCalendarConnections(connections: CalendarConnection[]): void {
-  write(KEYS.calendarConnections, connections);
+export async function saveCalendarConnections(connections: CalendarConnection[]): Promise<void> {
+  await supabaseApi.saveCalendarConnections(connections);
 }
 
-export function getPolls(): Poll[] {
-  return read<Poll[]>(KEYS.polls, []);
+export async function getPolls(): Promise<Poll[]> {
+  return supabaseApi.getPolls();
 }
 
-export function savePolls(polls: Poll[]): void {
-  write(KEYS.polls, polls);
-}
-
-export function getSuggestions(): Suggestion[] {
-  return migrateSuggestions(read<Suggestion[]>(KEYS.suggestions, []));
+export async function savePolls(polls: Poll[]): Promise<void> {
+  await supabaseApi.savePolls(polls);
 }
 
 function migrateSuggestions(items: Suggestion[]): Suggestion[] {
@@ -139,8 +125,7 @@ function migrateSuggestions(items: Suggestion[]): Suggestion[] {
   return items.map((s) => {
     const createdAt = s.createdAt ?? now;
     const age = Date.now() - new Date(createdAt).getTime();
-    const shouldArchive =
-      !s.archived && s.likes.length === 0 && age >= archiveMs;
+    const shouldArchive = !s.archived && s.likes.length === 0 && age >= archiveMs;
     return {
       ...s,
       createdAt,
@@ -149,96 +134,79 @@ function migrateSuggestions(items: Suggestion[]): Suggestion[] {
   });
 }
 
-export function saveSuggestions(suggestions: Suggestion[]): void {
-  const migrated = migrateSuggestions(suggestions);
-  write(KEYS.suggestions, migrated);
+export async function getSuggestions(): Promise<Suggestion[]> {
+  return migrateSuggestions(await supabaseApi.getSuggestions());
 }
 
-export function getNotifications(): Notification[] {
-  return read<Notification[]>(KEYS.notifications, []);
+export async function saveSuggestions(suggestions: Suggestion[]): Promise<void> {
+  await supabaseApi.saveSuggestions(migrateSuggestions(suggestions));
 }
 
-export function saveNotifications(notifications: Notification[]): void {
-  write(KEYS.notifications, notifications);
+export async function getNotifications(): Promise<Notification[]> {
+  return supabaseApi.getNotifications();
 }
 
-export function getMessages(): RoomMessage[] {
-  return read<RoomMessage[]>(KEYS.messages, []);
+export async function saveNotifications(notifications: Notification[]): Promise<void> {
+  await supabaseApi.saveNotifications(notifications);
 }
 
-export function saveMessages(messages: RoomMessage[]): void {
-  write(KEYS.messages, messages);
+export async function getMessages(): Promise<RoomMessage[]> {
+  return supabaseApi.getMessages();
 }
 
-export function getRoomNicknames(): RoomNickname[] {
-  return read<RoomNickname[]>(KEYS.nicknames, []);
+export async function saveMessages(messages: RoomMessage[]): Promise<void> {
+  await supabaseApi.saveMessages(messages);
 }
 
-export function saveRoomNicknames(nicknames: RoomNickname[]): void {
-  write(KEYS.nicknames, nicknames);
+export async function getRoomNicknames(): Promise<RoomNickname[]> {
+  return supabaseApi.getRoomNicknames();
 }
 
-export function getNicknameRequests(): NicknameRequest[] {
-  return read<NicknameRequest[]>(KEYS.nicknameRequests, []);
+export async function saveRoomNicknames(nicknames: RoomNickname[]): Promise<void> {
+  await supabaseApi.saveRoomNicknames(nicknames);
 }
 
-export function saveNicknameRequests(requests: NicknameRequest[]): void {
-  write(KEYS.nicknameRequests, requests);
+export async function getNicknameRequests(): Promise<NicknameRequest[]> {
+  return supabaseApi.getNicknameRequests();
 }
 
-export function getPersonalRoomAccess(): PersonalRoomAccess[] {
-  return read<PersonalRoomAccess[]>(KEYS.personalAccess, []);
+export async function saveNicknameRequests(requests: NicknameRequest[]): Promise<void> {
+  await supabaseApi.saveNicknameRequests(requests);
 }
 
-export function savePersonalRoomAccess(access: PersonalRoomAccess[]): void {
-  write(KEYS.personalAccess, access);
+export async function getPersonalRoomAccess(): Promise<PersonalRoomAccess[]> {
+  return supabaseApi.getPersonalRoomAccess();
 }
 
-export function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+export async function savePersonalRoomAccess(access: PersonalRoomAccess[]): Promise<void> {
+  await supabaseApi.savePersonalRoomAccess(access);
 }
 
-/** Stable demo friend IDs so they persist across sessions */
+/** Stable demo friend emails so they persist across sessions */
 export const DEMO_FRIEND_IDS = {
-  alex: "demo-friend-alex",
-  sam: "demo-friend-sam",
-  jordan: "demo-friend-jordan",
+  alex: "alex@demo.com",
+  sam: "sam@demo.com",
+  jordan: "jordan@demo.com",
 } as const;
 
-export function linkExistingDemoFriends(currentUserId: string): void {
-  const users = read<User[]>(KEYS.users, []);
+export async function linkExistingDemoFriends(currentUserId: string): Promise<void> {
+  const users = await getUsers();
   const demos = users.filter((u) => u.email.endsWith("@demo.com"));
-  if (demos.length === 0) return;
   const current = users.find((u) => u.id === currentUserId);
-  if (!current) return;
-  const demoIds = demos.map((d) => d.id);
-  const needsUpdate = demoIds.some((id) => !current.friendIds.includes(id));
-  if (!needsUpdate) return;
-  const updatedCurrent: User = {
-    ...current,
-    friendIds: [...new Set([...current.friendIds, ...demoIds])],
-  };
-  saveUsers(
-    users.map((u) => (u.id === currentUserId ? updatedCurrent : u))
-  );
+  if (!current || demos.length === 0) return;
+  const merged = [...new Set([...current.friendIds, ...demos.map((d) => d.id)])];
+  await saveUsers(users.map((u) => (u.id === currentUserId ? { ...u, friendIds: merged } : u)));
 }
 
-export function seedDemoFriends(currentUserId: string): void {
-  const users = getUsers();
-  if (users.some((u) => u.id === DEMO_FRIEND_IDS.alex)) {
-    linkExistingDemoFriends(currentUserId);
-    return;
-  }
-  if (users.some((u) => u.email === "alex@demo.com")) {
-    linkExistingDemoFriends(currentUserId);
-    return;
-  }
+export async function seedDemoFriends(currentUserId: string): Promise<void> {
+  const users = await getUsers();
+  const current = users.find((u) => u.id === currentUserId);
+  if (!current) return;
 
-  const demoUsers: User[] = [
+  const demoSeed: Array<Omit<User, "id" | "friendIds"> & { email: string }> = [
     {
-      id: DEMO_FRIEND_IDS.alex,
-      email: "alex@demo.com",
-      password: "demo123",
+      email: DEMO_FRIEND_IDS.alex,
+      password: await sha256("demo123"),
       displayName: "Alex",
       avatar: {
         hairstyle: "short",
@@ -251,14 +219,12 @@ export function seedDemoFriends(currentUserId: string): void {
         accessory: "headphones",
         skinTone: "#e8c4a8",
       },
-      friendIds: [currentUserId, DEMO_FRIEND_IDS.sam, DEMO_FRIEND_IDS.jordan],
       online: true,
       avatarCustomized: true,
     },
     {
-      id: DEMO_FRIEND_IDS.sam,
-      email: "sam@demo.com",
-      password: "demo123",
+      email: DEMO_FRIEND_IDS.sam,
+      password: await sha256("demo123"),
       displayName: "Sam",
       avatar: {
         hairstyle: "curly",
@@ -271,14 +237,12 @@ export function seedDemoFriends(currentUserId: string): void {
         accessory: "glasses",
         skinTone: "#d4a574",
       },
-      friendIds: [currentUserId, DEMO_FRIEND_IDS.alex, DEMO_FRIEND_IDS.jordan],
       online: true,
       avatarCustomized: true,
     },
     {
-      id: DEMO_FRIEND_IDS.jordan,
-      email: "jordan@demo.com",
-      password: "demo123",
+      email: DEMO_FRIEND_IDS.jordan,
+      password: await sha256("demo123"),
       displayName: "Jordan",
       avatar: {
         hairstyle: "bun",
@@ -291,50 +255,104 @@ export function seedDemoFriends(currentUserId: string): void {
         accessory: "hat",
         skinTone: "#c68642",
       },
-      friendIds: [currentUserId, DEMO_FRIEND_IDS.alex, DEMO_FRIEND_IDS.sam],
       online: true,
       avatarCustomized: true,
     },
   ];
 
-  const current = users.find((u) => u.id === currentUserId);
-  if (!current) return;
+  const byEmail = new Map(users.map((u) => [u.email, u]));
+  const next = [...users];
+  for (const seed of demoSeed) {
+    if (byEmail.has(seed.email)) continue;
+    next.push({
+      id: generateId(),
+      email: seed.email,
+      password: seed.password,
+      displayName: seed.displayName,
+      avatar: seed.avatar,
+      friendIds: [],
+      online: seed.online,
+      avatarCustomized: seed.avatarCustomized,
+    });
+  }
 
-  const updatedCurrent: User = {
-    ...current,
-    friendIds: [
-      ...new Set([
-        ...current.friendIds,
-        DEMO_FRIEND_IDS.alex,
-        DEMO_FRIEND_IDS.sam,
-        DEMO_FRIEND_IDS.jordan,
-      ]),
-    ],
-  };
-
-  saveUsers([
-    ...users.filter((u) => u.id !== currentUserId),
-    updatedCurrent,
-    ...demoUsers,
-  ]);
+  const demoIds = next.filter((u) => u.email.endsWith("@demo.com")).map((u) => u.id);
+  const withFriendGraph = next.map((u) => {
+    if (u.id === currentUserId) {
+      return { ...u, friendIds: [...new Set([...u.friendIds, ...demoIds])] };
+    }
+    if (demoIds.includes(u.id)) {
+      return {
+        ...u,
+        friendIds: [...new Set([...u.friendIds, currentUserId, ...demoIds.filter((id) => id !== u.id)])],
+      };
+    }
+    return u;
+  });
+  await saveUsers(withFriendGraph);
 }
 
-export function ensurePersonalRoomsForRoom(room: VirtualRoom): PersonalRoomAccess[] {
-  const all = getPersonalRoomAccess();
+export async function ensurePersonalRoomsForRoom(room: VirtualRoom): Promise<PersonalRoomAccess[]> {
+  const all = await getPersonalRoomAccess();
   const existing = all.filter((a) => a.roomId === room.id);
-  const missing = room.memberIds.filter(
-    (id) => !existing.some((e) => e.ownerId === id)
-  );
+  const missing = room.memberIds.filter((id) => !existing.some((e) => e.ownerId === id));
   if (missing.length === 0) return all;
-
-  const added: PersonalRoomAccess[] = missing.map((ownerId) => ({
-    roomId: room.id,
-    ownerId,
-    grantedIds: [ownerId],
-    pendingRequests: [],
-  }));
-
-  const next = [...all, ...added];
-  savePersonalRoomAccess(next);
+  const next = [
+    ...all,
+    ...missing.map((ownerId) => ({
+      roomId: room.id,
+      ownerId,
+      grantedIds: [ownerId],
+      pendingRequests: [],
+    })),
+  ];
+  await savePersonalRoomAccess(next);
   return next;
+}
+
+export async function verifyCredentials(email: string, password: string): Promise<User | null> {
+  const hashed = await sha256(password);
+  return supabaseApi.getUserByCredentials(email, hashed);
+}
+
+export async function createUser(
+  email: string,
+  password: string
+): Promise<{ ok: true; user: User } | { ok: false; error: string }> {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized || password.length < 6) {
+    return { ok: false, error: "Email required and password must be at least 6 characters." };
+  }
+  const users = await getUsers();
+  if (users.some((u) => u.email === normalized)) {
+    return { ok: false, error: "An account with this email already exists." };
+  }
+  const passwordHash = await sha256(password);
+  const newUser: User = {
+    id: generateId(),
+    email: normalized,
+    password: passwordHash,
+    displayName: normalized.split("@")[0],
+    avatar: { ...DEFAULT_AVATAR },
+    friendIds: [],
+    online: true,
+    avatarCustomized: false,
+  };
+  try {
+    await supabaseApi.createAccount({
+      id: newUser.id,
+      email: newUser.email,
+      passwordHash,
+      displayName: newUser.displayName,
+      avatar: newUser.avatar,
+      avatarCustomized: newUser.avatarCustomized ?? false,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to create account.";
+    if (message.toLowerCase().includes("duplicate")) {
+      return { ok: false, error: "An account with this email already exists." };
+    }
+    return { ok: false, error: message };
+  }
+  return { ok: true, user: newUser };
 }

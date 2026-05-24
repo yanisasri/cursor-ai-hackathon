@@ -14,6 +14,7 @@ export function CreateRoom() {
   const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
   const [myNickname, setMyNickname] = useState("");
   const [initialized, setInitialized] = useState(false);
+  const [error, setError] = useState("");
 
   const friends = user
     ? users.filter((u) => user.friendIds.includes(u.id))
@@ -34,17 +35,23 @@ export function CreateRoom() {
     );
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    const room = createRoom({
-      name: name.trim(),
-      area,
-      maxMembers,
-      friendIds: selectedFriends,
-      myNickname: myNickname.trim() || undefined,
-    });
-    navigate(`/room/${room.id}`);
+    setError("");
+    try {
+      const room = await createRoom({
+        name: name.trim(),
+        area,
+        maxMembers,
+        friendIds: selectedFriends,
+        myNickname: myNickname.trim() || undefined,
+      });
+      navigate(`/room/${room.id}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unable to create room right now.";
+      setError(message);
+    }
   };
 
   return (
@@ -53,6 +60,9 @@ export function CreateRoom() {
       <main className="mx-auto max-w-2xl px-4 py-8">
         <h1 className="font-display text-2xl font-bold">Create a new room</h1>
         <form onSubmit={handleSubmit} className="card mt-6 space-y-6">
+          {error && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+          )}
           <div>
             <p className="mb-2 text-sm font-medium">1. Pick an area</p>
             <div className="grid grid-cols-2 gap-3">

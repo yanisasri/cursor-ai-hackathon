@@ -15,11 +15,12 @@ export function ChatPanel({ roomId }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const load = () => {
-      setMessages(getMessages().filter((m) => m.roomId === roomId));
+    const load = async () => {
+      const all = await getMessages();
+      setMessages(all.filter((m) => m.roomId === roomId));
     };
-    load();
-    const id = setInterval(load, 1000);
+    void load();
+    const id = setInterval(() => void load(), 1000);
     return () => clearInterval(id);
   }, [roomId]);
 
@@ -32,7 +33,7 @@ export function ChatPanel({ roomId }: Props) {
     }
   }, [messages, stickToBottom]);
 
-  const send = () => {
+  const send = async () => {
     if (!user || !text.trim()) return;
     const msg: RoomMessage = {
       id: generateId(),
@@ -41,7 +42,8 @@ export function ChatPanel({ roomId }: Props) {
       text: text.trim(),
       createdAt: new Date().toISOString(),
     };
-    saveMessages([...getMessages(), msg]);
+    const all = await getMessages();
+    await saveMessages([...all, msg]);
     setMessages((m) => [...m, msg]);
     setText("");
   };

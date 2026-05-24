@@ -11,8 +11,8 @@ export function FriendsSidebar() {
 
   const friends = users.filter((u) => user.friendIds.includes(u.id));
 
-  const handleAdd = () => {
-    const result = addFriendByEmail(email);
+  const handleAdd = async () => {
+    const result = await addFriendByEmail(email);
     if (result.ok) {
       setEmail("");
       setMsg("Friend added!");
