@@ -19,11 +19,21 @@ A low-pressure virtual social hub for the Cursor AI Hackathon (2026) — hang ou
 ### Virtual rooms
 - Bird's-eye virtual world with **WASD**, click-to-move, and on-screen controls
 - **Live avatar sync** — see friends move around the room in real time (Supabase Realtime broadcast)
-- Sub-rooms: living, calendar, decision-making, suggestions, personal (request to enter)
-- **WebRTC voice chat** in the living room (all members) and personal rooms (owner + one approved guest)
+- Sub-rooms: living, calendar, decision-making, suggestions, personal
+- **WebRTC voice chat** in the living room (all members) and personal rooms (owner + one guest inside)
 - Message chat with **room nicknames** (per-room display names)
 - Room settings — invite members, propose room name changes with member approval
 - Leave room; rooms auto-delete when only one member remains
+
+### Personal rooms
+Each member has a private room on the map (max **2 people** inside: owner + one guest).
+
+- **Auto-enter your room** — walk into your personal zone and you're in; no extra button needed
+- **Ring doorbell** — request access when a friend is home (online/idle)
+- **Leave a note** — when a friend is away (offline), compose a mailbox note with custom paper, envelope color, and stickers (≤100 words)
+- **Mailbox inbox** — owners see notes in their personal room; unread notes play a doorbell sound
+- **Access flow** — owner approves/denies requests; approved guests enter when the room is free; wait-your-turn if someone else is inside
+- Hover a friend's personal room on the map for a quick visit panel (doorbell, enter, or mailbox)
 
 ### Home & coordination
 - Room cards on home show member avatars with **presence-colored rings** (green = online, amber = idle, grey = offline)
@@ -47,7 +57,7 @@ A low-pressure virtual social hub for the Cursor AI Hackathon (2026) — hang ou
    - **Calendar** — Shared events, hangout requests, RSVP, color-coded by member
    - **Decision** — Polls, wheel spinner, tier list, swipe cards
    - **Suggestions** — Add and rank ideas
-   - **Personal** — Request to enter a private space; approved guests can use 1:1 voice
+   - **Personal** — Walk to your room (auto-enter) or a friend's room — ring doorbell, enter if approved, or leave a mailbox note if they're away
    - **Settings** — Room nicknames, invites, and name-change approvals
 7. **Account** (top right) — View email, edit avatar, manage friends, sign out, or delete account.
 8. **Notifications** (bell icon) — Friend requests, room invites, hangouts, calendar, and voting alerts.
@@ -83,9 +93,10 @@ Each room is a top-down “house” map with a central hallway and clickable zon
 | Calendar | Shared availability and hangout planning |
 | Decision room | Polls, spinner, tier list, swipe cards |
 | Ideas | Suggestions and weekly rankings |
-| Personal rooms | One per member; request access for 1:1 hangouts |
+| Personal rooms | One per member — doorbell, mailbox, and 1:1 voice |
 
 Avatars spawn in the hallway and walk into zones. Other members' positions sync over Realtime while you're in the room.
+
 
 ## Project structure
 
@@ -98,9 +109,11 @@ cursor-ai-hackathon/
 └── src/
     ├── pages/             Landing, auth, avatar setup, home, room creation, virtual room, account
     ├── components/        Avatar editor, friends sidebar, chat, virtual world, decision tools, voice
-    ├── context/           App state (auth, rooms, friends, notifications)
+    │   ├── mailbox/       Note composer, inbox, send animation, external mailbox UI
+    │   └── decision/      Polls, wheel, tier list, swipe cards
+    ├── context/           App state (auth, rooms, friends, notifications, mailbox)
     ├── hooks/             WASD movement, voice chat, live avatar presence
-    ├── lib/               Supabase API, storage, DiceBear avatars, voice channels
+    ├── lib/               Supabase API, storage, DiceBear avatars, voice channels, doorbell sound
     └── types/             TypeScript types and presence helpers
 ```
 
