@@ -2,15 +2,19 @@ import type {
   CalendarConnection,
   CalendarEvent,
   CalendarSlot,
+  FriendRequest,
   NicknameRequest,
   Notification,
   PersonalRoomAccess,
   Poll,
   RoomDecisionOptions,
+  RoomInvite,
   RoomMessage,
+  RoomNameChangeRequest,
   RoomNickname,
   Suggestion,
   User,
+  UserPresence,
   VirtualRoom,
 } from "../types";
 import { ARCHIVE_DAYS, DEFAULT_AVATAR } from "../types";
@@ -69,7 +73,79 @@ export async function saveUsers(users: User[]): Promise<void> {
 }
 
 export async function setUserOnline(userId: string, isOnline: boolean): Promise<void> {
-  await supabaseApi.setUserOnline(userId, isOnline);
+  await supabaseApi.setUserPresence(userId, isOnline ? "online" : "offline");
+}
+
+export async function setUserPresence(userId: string, presence: UserPresence): Promise<void> {
+  await supabaseApi.setUserPresence(userId, presence);
+}
+
+export async function getFriendRequests(): Promise<FriendRequest[]> {
+  try {
+    return await supabaseApi.getFriendRequests();
+  } catch {
+    return [];
+  }
+}
+
+export async function createFriendRequest(fromUserId: string, toUserId: string): Promise<void> {
+  await supabaseApi.createFriendRequest(fromUserId, toUserId);
+}
+
+export async function respondFriendRequest(
+  userId: string,
+  otherUserId: string,
+  accept: boolean
+): Promise<void> {
+  await supabaseApi.respondFriendRequest(userId, otherUserId, accept);
+}
+
+export async function getRoomInvites(): Promise<RoomInvite[]> {
+  try {
+    return await supabaseApi.getRoomInvites();
+  } catch {
+    return [];
+  }
+}
+
+export async function createRoomInvite(
+  roomId: string,
+  fromUserId: string,
+  toUserId: string
+): Promise<void> {
+  await supabaseApi.createRoomInvite(roomId, fromUserId, toUserId);
+}
+
+export async function respondRoomInvite(
+  inviteId: string,
+  userId: string,
+  accept: boolean
+): Promise<void> {
+  await supabaseApi.respondRoomInvite(inviteId, userId, accept);
+}
+
+export async function getRoomNameChangeRequests(): Promise<RoomNameChangeRequest[]> {
+  try {
+    return await supabaseApi.getRoomNameChangeRequests();
+  } catch {
+    return [];
+  }
+}
+
+export async function proposeRoomNameChange(
+  roomId: string,
+  proposedByUserId: string,
+  proposedName: string
+): Promise<string> {
+  return supabaseApi.proposeRoomNameChange(roomId, proposedByUserId, proposedName);
+}
+
+export async function respondRoomNameChange(
+  requestId: string,
+  userId: string,
+  approve: boolean
+): Promise<{ applied: boolean; roomId: string }> {
+  return supabaseApi.respondRoomNameChange(requestId, userId, approve);
 }
 
 export async function upsertUserAvatars(users: User[]): Promise<void> {
@@ -305,6 +381,7 @@ export async function createUser(
     avatar: { ...DEFAULT_AVATAR, seed: createAvatarSeed() },
     friendIds: [],
     online: true,
+    presence: "online",
     avatarCustomized: false,
   };
   try {

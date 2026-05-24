@@ -2,9 +2,11 @@ import { useState } from "react";
 import { useApp } from "../context/AppContext";
 import { AvatarPreview } from "./AvatarPreview";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { presenceDotClass, presenceLabel } from "../types";
 
 export function FriendsSidebar() {
-  const { user, users, addFriendByEmail, removeFriend } = useApp();
+  const { user, users, friendRequests, addFriendByEmail, respondToFriendRequest, removeFriend } =
+    useApp();
   const [email, setEmail] = useState("");
   const [msg, setMsg] = useState("");
   const [unfriendTarget, setUnfriendTarget] = useState<{
@@ -12,19 +14,53 @@ export function FriendsSidebar() {
     displayName: string;
   } | null>(null);
   const [unfriending, setUnfriending] = useState(false);
+  const [respondingId, setRespondingId] = useState<string | null>(null);
 
   if (!user) return null;
 
   const friends = users.filter((u) => user.friendIds.includes(u.id));
 
+  const incomingRequests = friendRequests.filter(
+    (r) =>
+      r.status === "pending" &&
+      r.requestedBy !== user.id &&
+      (r.userId === user.id || r.friendId === user.id)
+  );
+
+  const outgoingRequests = friendRequests.filter(
+    (r) =>
+      r.status === "pending" &&
+      r.requestedBy === user.id &&
+      (r.userId === user.id || r.friendId === user.id)
+  );
+
+  const otherUserId = (r: (typeof friendRequests)[0]) =>
+    r.userId === user.id ? r.friendId : r.userId;
+
   const handleAdd = async () => {
     const result = await addFriendByEmail(email);
     if (result.ok) {
       setEmail("");
-      setMsg("Friend added!");
+      setMsg("Friend request sent!");
     } else {
       setMsg(result.error ?? "Error");
     }
+    setTimeout(() => setMsg(""), 3000);
+  };
+
+  const handleRespond = async (otherId: string, accept: boolean) => {
+    setRespondingId(otherId);
+    const result = await respondToFriendRequest(otherId, accept);
+    setRespondingId(null);
+    setMsg(result.ok ? (accept ? "Friend added!" : "Request declined.") : (result.error ?? "Error"));
+    setTimeout(() => setMsg(""), 3000);
+  };
+
+  const handleCancelOutgoing = async (otherId: string) => {
+    setRespondingId(otherId);
+    const result = await respondToFriendRequest(otherId, false);
+    setRespondingId(null);
+    setMsg(result.ok ? "Request cancelled." : (result.error ?? "Error"));
     setTimeout(() => setMsg(""), 3000);
   };
 
@@ -51,10 +87,80 @@ export function FriendsSidebar() {
             onChange={(e) => setEmail(e.target.value)}
           />
           <button type="button" className="btn-primary shrink-0 px-3 text-sm" onClick={handleAdd}>
-            Add
+            Send request
           </button>
         </div>
         {msg && <p className="text-xs text-plum-600">{msg}</p>}
+
+        {incomingRequests.length > 0 && (
+          <div className="rounded-xl border border-plum-200 bg-plum-50/50 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-plum-700">
+              Incoming requests
+            </p>
+            <ul className="mt-2 space-y-2">
+              {incomingRequests.map((r) => {
+                const fromId = otherUserId(r);
+                const from = users.find((u) => u.id === fromId);
+                return (
+                  <li key={`${r.userId}:${r.friendId}`} className="flex items-center gap-2">
+                    <AvatarPreview avatar={from?.avatar ?? user.avatar} size="sm" />
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                      {from?.displayName ?? "User"}
+                    </span>
+                    <button
+                      type="button"
+                      className="rounded-lg bg-plum-600 px-2 py-1 text-xs text-white hover:bg-plum-700"
+                      disabled={respondingId === fromId}
+                      onClick={() => void handleRespond(fromId, true)}
+                    >
+                      Accept
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-cozy-200 px-2 py-1 text-xs hover:bg-cozy-50"
+                      disabled={respondingId === fromId}
+                      onClick={() => void handleRespond(fromId, false)}
+                    >
+                      Decline
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+
+        {outgoingRequests.length > 0 && (
+          <div className="rounded-xl border border-cozy-200 bg-cozy-50/80 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-cozy-700">
+              Sent requests
+            </p>
+            <p className="mt-0.5 text-xs text-cozy-500">Waiting for them to accept.</p>
+            <ul className="mt-2 space-y-2">
+              {outgoingRequests.map((r) => {
+                const toId = otherUserId(r);
+                const to = users.find((u) => u.id === toId);
+                return (
+                  <li key={`out-${r.userId}:${r.friendId}`} className="flex items-center gap-2">
+                    <AvatarPreview avatar={to?.avatar ?? user.avatar} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{to?.displayName ?? "User"}</p>
+                      <p className="truncate text-xs text-cozy-500">{to?.email ?? ""}</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-lg border border-cozy-200 px-2 py-1 text-xs text-cozy-600 hover:bg-white"
+                      disabled={respondingId === toId}
+                      onClick={() => void handleCancelOutgoing(toId)}
+                    >
+                      Cancel
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
 
         <ul className="max-h-80 space-y-3 overflow-y-auto">
           {friends.length === 0 ? (
@@ -72,11 +178,9 @@ export function FriendsSidebar() {
                   <p className="truncate font-medium">{f.displayName}</p>
                   <p className="flex items-center gap-1 text-xs text-cozy-500">
                     <span
-                      className={`inline-block h-2 w-2 rounded-full ${
-                        f.online ? "bg-green-500" : "bg-cozy-300"
-                      }`}
+                      className={`inline-block h-2 w-2 rounded-full ${presenceDotClass(f.presence)}`}
                     />
-                    {f.online ? "Online" : "Offline"}
+                    {presenceLabel(f.presence)}
                   </p>
                 </div>
                 <button

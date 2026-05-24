@@ -10,16 +10,21 @@ import {
 import {
   createRoomRecord,
   createUser,
+  createFriendRequest,
+  createRoomInvite,
   ensurePersonalRoomsForRoom,
   generateId,
   getCalendarConnections,
   getCalendarEvents,
   getCalendarSlots,
   getDecisionOptionsByRoom,
+  getFriendRequests,
   getNicknameRequests,
   getNotifications,
   getPersonalRoomAccess,
   getPolls,
+  getRoomInvites,
+  getRoomNameChangeRequests,
   getRoomNicknames,
   getRooms,
   getSessionUserId,
@@ -28,7 +33,11 @@ import {
   deleteAccount as deleteAccountFromDb,
   getUsers,
   leaveRoom as leaveRoomRecord,
+  proposeRoomNameChange,
   removeFriendship,
+  respondFriendRequest as respondFriendRequestDb,
+  respondRoomInvite,
+  respondRoomNameChange as respondRoomNameChangeDb,
   saveCalendarConnections,
   saveCalendarEvents,
   saveCalendarSlots,
@@ -40,9 +49,8 @@ import {
   saveRoomNicknames,
   saveSuggestions,
   saveSuggestionCategoriesByRoom,
-  saveUsers,
   setSessionUserId,
-  setUserOnline,
+  setUserPresence,
   upsertUserAvatars,
   verifyCredentials,
 } from "../lib/storage";
@@ -55,16 +63,20 @@ import {
   type CalendarConnection,
   type CalendarEvent,
   type CalendarSlot,
+  type FriendRequest,
   type NicknameRequest,
   type Notification,
   type PersonalRoomAccess,
   type Poll,
   type RoomArea,
   type RoomDecisionOptions,
+  type RoomInvite,
+  type RoomNameChangeRequest,
   type RoomNickname,
   type Suggestion,
   type SuggestionCategory,
   type User,
+  type UserPresence,
   type VirtualRoom,
 } from "../types";
 
@@ -80,6 +92,9 @@ interface AppContextValue {
   suggestionCategoriesByRoom: Record<string, string[]>;
   decisionOptionsByRoom: Record<string, RoomDecisionOptions>;
   notifications: Notification[];
+  friendRequests: FriendRequest[];
+  roomInvites: RoomInvite[];
+  roomNameChangeRequests: RoomNameChangeRequest[];
   roomNicknames: RoomNickname[];
   nicknameRequests: NicknameRequest[];
   personalRoomAccess: PersonalRoomAccess[];
@@ -88,9 +103,29 @@ interface AppContextValue {
   signOut: () => void;
   updateAvatar: (avatar: AvatarConfig) => void;
   addFriendByEmail: (email: string) => Promise<{ ok: boolean; error?: string }>;
+  respondToFriendRequest: (
+    otherUserId: string,
+    accept: boolean
+  ) => Promise<{ ok: boolean; error?: string }>;
   removeFriend: (friendId: string) => Promise<{ ok: boolean; error?: string }>;
   deleteAccount: () => Promise<{ ok: boolean; error?: string }>;
   leaveRoom: (roomId: string) => Promise<{ ok: boolean; error?: string }>;
+  sendRoomInvite: (
+    roomId: string,
+    friendId: string
+  ) => Promise<{ ok: boolean; error?: string }>;
+  respondToRoomInvite: (
+    inviteId: string,
+    accept: boolean
+  ) => Promise<{ ok: boolean; error?: string }>;
+  proposeRoomNameChange: (
+    roomId: string,
+    newName: string
+  ) => Promise<{ ok: boolean; error?: string }>;
+  respondToRoomNameChange: (
+    requestId: string,
+    approve: boolean
+  ) => Promise<{ ok: boolean; error?: string }>;
   createRoom: (data: {
     name: string;
     area: RoomArea;
@@ -141,6 +176,7 @@ interface AppContextValue {
     message: string
   ) => void;
   markNotificationRead: (id: string) => void;
+  setPresence: (presence: UserPresence) => void;
   toggleOnline: (online: boolean) => void;
   requestPersonalRoomAccess: (roomId: string, ownerId: string) => { ok: boolean; error?: string };
   grantPersonalRoomAccess: (roomId: string, ownerId: string, userId: string) => { ok: boolean; error?: string };
@@ -167,6 +203,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     Record<string, RoomDecisionOptions>
   >({});
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
+  const [roomInvites, setRoomInvites] = useState<RoomInvite[]>([]);
+  const [roomNameChangeRequests, setRoomNameChangeRequests] = useState<RoomNameChangeRequest[]>(
+    []
+  );
   const [roomNicknames, setRoomNicknames] = useState<RoomNickname[]>([]);
   const [nicknameRequests, setNicknameRequests] = useState<NicknameRequest[]>([]);
   const [personalRoomAccess, setPersonalRoomAccess] = useState<PersonalRoomAccess[]>([]);
@@ -183,6 +224,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       allCategoryMap,
       allDecisionOptions,
       allNotifications,
+      allFriendRequests,
+      allRoomInvites,
+      allRoomNameChanges,
       allNicknames,
       allNicknameRequests,
       allPersonalAccess,
@@ -196,6 +240,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       getSuggestionCategoriesByRoom(),
       getDecisionOptionsByRoom(),
       getNotifications(),
+      getFriendRequests(),
+      getRoomInvites(),
+      getRoomNameChangeRequests(),
       getRoomNicknames(),
       getNicknameRequests(),
       getPersonalRoomAccess(),
@@ -211,6 +258,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSuggestionCategoriesByRoom(allCategoryMap);
     setDecisionOptionsByRoom(allDecisionOptions);
     setNotifications(allNotifications);
+    setFriendRequests(allFriendRequests);
+    setRoomInvites(allRoomInvites);
+    setRoomNameChangeRequests(allRoomNameChanges);
     setRoomNicknames(allNicknames);
     setNicknameRequests(allNicknameRequests);
     setPersonalRoomAccess(allPersonalAccess);
@@ -227,6 +277,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  /** Best-effort — social notifications use friend/room types that need DB migration. */
+  const appendNotifications = useCallback(
+    async (extra: Notification[]) => {
+      if (extra.length === 0) return;
+      try {
+        await saveNotifications([...notifications, ...extra]);
+      } catch {
+        // Core action already succeeded; run supabase/notifications_type_fix.sql to enable these.
+      }
+    },
+    [notifications]
+  );
 
   const signUp = useCallback(async (email: string, password: string) => {
     try {
@@ -247,7 +310,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const found = await verifyCredentials(email, password);
       if (!found) return { ok: false, error: "Invalid email or password." };
 
-      await setUserOnline(found.id, true);
+      await setUserPresence(found.id, "online");
 
       setSessionUserId(found.id);
 
@@ -262,7 +325,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(() => {
     if (user) {
-      void setUserOnline(user.id, false).then(() => loadAll());
+      void setUserPresence(user.id, "offline").then(() => loadAll());
     }
     setSessionUserId(null);
     setUser(null);
@@ -288,18 +351,84 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (user.friendIds.includes(friend.id)) {
         return { ok: false, error: "Already friends." };
       }
-      const nextUsers = users.map((u) => {
-        if (u.id === user.id) return { ...u, friendIds: [...u.friendIds, friend.id] };
-        if (u.id === friend.id && !u.friendIds.includes(user.id)) {
-          return { ...u, friendIds: [...u.friendIds, user.id] };
+
+      const pairHas = (a: string, b: string) =>
+        friendRequests.some(
+          (r) =>
+            r.status === "pending" &&
+            ((r.userId === a && r.friendId === b) || (r.userId === b && r.friendId === a))
+        );
+
+      if (pairHas(user.id, friend.id)) {
+        const incoming = friendRequests.find(
+          (r) =>
+            r.status === "pending" &&
+            r.requestedBy === friend.id &&
+            ((r.userId === user.id && r.friendId === friend.id) ||
+              (r.userId === friend.id && r.friendId === user.id))
+        );
+        if (incoming) {
+          return {
+            ok: false,
+            error: "They already sent you a request — accept it below.",
+          };
         }
-        return u;
-      });
-      await saveUsers(nextUsers);
-      await loadAll();
-      return { ok: true };
+        return { ok: false, error: "Friend request already sent." };
+      }
+
+      try {
+        await createFriendRequest(user.id, friend.id);
+        const now = new Date().toISOString();
+        await appendNotifications([
+          {
+            id: generateId(),
+            userId: friend.id,
+            type: "friend",
+            title: "Friend request",
+            message: `${user.displayName} wants to be your friend.`,
+            read: false,
+            createdAt: now,
+          },
+        ]);
+        await loadAll();
+        return { ok: true };
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Could not send friend request.";
+        return { ok: false, error: message };
+      }
     },
-    [user, users, loadAll]
+    [user, users, friendRequests, appendNotifications, loadAll]
+  );
+
+  const respondToFriendRequest = useCallback(
+    async (otherUserId: string, accept: boolean) => {
+      if (!user) return { ok: false, error: "Not signed in." };
+      try {
+        await respondFriendRequestDb(user.id, otherUserId, accept);
+        if (accept) {
+          const now = new Date().toISOString();
+          await appendNotifications([
+            {
+              id: generateId(),
+              userId: otherUserId,
+              type: "friend",
+              title: "Friend request accepted",
+              message: `${user.displayName} accepted your friend request.`,
+              read: false,
+              createdAt: now,
+            },
+          ]);
+        }
+        await loadAll();
+        return { ok: true };
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Could not respond to friend request.";
+        return { ok: false, error: message };
+      }
+    },
+    [user, appendNotifications, loadAll]
   );
 
   const removeFriend = useCallback(
@@ -322,10 +451,170 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [user, loadAll]
   );
 
+  const sendRoomInvite = useCallback(
+    async (roomId: string, friendId: string) => {
+      if (!user) return { ok: false, error: "Not signed in." };
+      if (!user.friendIds.includes(friendId)) {
+        return { ok: false, error: "You can only invite friends." };
+      }
+      const room = rooms.find((r) => r.id === roomId);
+      if (!room) return { ok: false, error: "Room not found." };
+      try {
+        await createRoomInvite(roomId, user.id, friendId);
+        const now = new Date().toISOString();
+        await appendNotifications([
+          {
+            id: generateId(),
+            userId: friendId,
+            type: "room",
+            title: "Room invite",
+            message: `${user.displayName} invited you to join "${room.name}".`,
+            read: false,
+            createdAt: now,
+          },
+        ]);
+        await loadAll();
+        return { ok: true };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Could not send invite.";
+        return { ok: false, error: message };
+      }
+    },
+    [user, rooms, appendNotifications, loadAll]
+  );
+
+  const respondToRoomInvite = useCallback(
+    async (inviteId: string, accept: boolean) => {
+      if (!user) return { ok: false, error: "Not signed in." };
+      const invite = roomInvites.find((i) => i.id === inviteId);
+      if (!invite) return { ok: false, error: "Invite not found." };
+      const room = rooms.find((r) => r.id === invite.roomId);
+      try {
+        await respondRoomInvite(inviteId, user.id, accept);
+        if (accept && room) {
+          const now = new Date().toISOString();
+          await appendNotifications([
+            {
+              id: generateId(),
+              userId: invite.fromUserId,
+              type: "room",
+              title: "Invite accepted",
+              message: `${user.displayName} joined "${room.name}".`,
+              read: false,
+              createdAt: now,
+            },
+          ]);
+        }
+        await loadAll();
+        return { ok: true };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Could not respond to invite.";
+        return { ok: false, error: message };
+      }
+    },
+    [user, roomInvites, rooms, appendNotifications, loadAll]
+  );
+
+  const proposeRoomNameChangeHandler = useCallback(
+    async (roomId: string, newName: string) => {
+      if (!user) return { ok: false, error: "Not signed in." };
+      const room = rooms.find((r) => r.id === roomId);
+      if (!room) return { ok: false, error: "Room not found." };
+      try {
+        await proposeRoomNameChange(roomId, user.id, newName);
+        const trimmed = newName.trim();
+        const now = new Date().toISOString();
+        const memberNotifications = room.memberIds
+          .filter((id) => id !== user.id)
+          .map((memberId) => ({
+            id: generateId(),
+            userId: memberId,
+            type: "room" as const,
+            title: "Room rename requested",
+            message: `${user.displayName} wants to rename "${room.name}" to "${trimmed}". Approve in room settings.`,
+            read: false,
+            createdAt: now,
+          }));
+        if (memberNotifications.length > 0) {
+          await appendNotifications(memberNotifications);
+        }
+        await loadAll();
+        return { ok: true };
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Could not propose name change.";
+        return { ok: false, error: message };
+      }
+    },
+    [user, rooms, appendNotifications, loadAll]
+  );
+
+  const respondToRoomNameChange = useCallback(
+    async (requestId: string, approve: boolean) => {
+      if (!user) return { ok: false, error: "Not signed in." };
+      const request = roomNameChangeRequests.find((r) => r.id === requestId);
+      if (!request) return { ok: false, error: "Request not found." };
+      const room = rooms.find((r) => r.id === request.roomId);
+      try {
+        const result = await respondRoomNameChangeDb(requestId, user.id, approve);
+        const now = new Date().toISOString();
+        const proposer = users.find((u) => u.id === request.proposedByUserId);
+        const extra: Notification[] = [];
+
+        if (!approve) {
+          if (proposer) {
+            extra.push({
+              id: generateId(),
+              userId: proposer.id,
+              type: "room",
+              title: "Rename declined",
+              message: `${user.displayName} declined renaming the room to "${request.proposedName}".`,
+              read: false,
+              createdAt: now,
+            });
+          }
+        } else if (result.applied && room) {
+          for (const memberId of room.memberIds) {
+            extra.push({
+              id: generateId(),
+              userId: memberId,
+              type: "room",
+              title: "Room renamed",
+              message: `Everyone approved — this room is now called "${request.proposedName}".`,
+              read: false,
+              createdAt: now,
+            });
+          }
+        } else if (approve && proposer) {
+          extra.push({
+            id: generateId(),
+            userId: proposer.id,
+            type: "room",
+            title: "Rename approval",
+            message: `${user.displayName} approved renaming to "${request.proposedName}".`,
+            read: false,
+            createdAt: now,
+          });
+        }
+
+        if (extra.length > 0) {
+          await appendNotifications(extra);
+        }
+        await loadAll();
+        return { ok: true };
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Could not respond to name change.";
+        return { ok: false, error: message };
+      }
+    },
+    [user, roomNameChangeRequests, rooms, users, appendNotifications, loadAll]
+  );
+
   const deleteAccount = useCallback(async () => {
     if (!user) return { ok: false, error: "Not signed in." };
     try {
-      await setUserOnline(user.id, false);
+      await setUserPresence(user.id, "offline");
       await deleteAccountFromDb(user.id);
       setSessionUserId(null);
       setUser(null);
@@ -825,13 +1114,49 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [notifications, loadAll]
   );
 
-  const toggleOnline = useCallback(
-    (online: boolean) => {
+  const setPresence = useCallback(
+    (presence: UserPresence) => {
       if (!user) return;
-      void setUserOnline(user.id, online).then(() => loadAll());
+      void setUserPresence(user.id, presence).then(() => loadAll());
     },
     [user, loadAll]
   );
+
+  const toggleOnline = useCallback(
+    (online: boolean) => {
+      setPresence(online ? "online" : "offline");
+    },
+    [setPresence]
+  );
+
+  useEffect(() => {
+    if (!user || user.presence === "offline") return;
+    const idleMs = 5 * 60 * 1000;
+    let idleTimer: ReturnType<typeof setTimeout>;
+
+    const bumpActivity = () => {
+      clearTimeout(idleTimer);
+      if (user.presence === "idle") {
+        void setUserPresence(user.id, "online").then(() => loadAll());
+      }
+      idleTimer = setTimeout(() => {
+        void setUserPresence(user.id, "idle").then(() => loadAll());
+      }, idleMs);
+    };
+
+    const events = ["mousemove", "keydown", "click", "scroll", "touchstart"] as const;
+    for (const event of events) {
+      window.addEventListener(event, bumpActivity, { passive: true });
+    }
+    bumpActivity();
+
+    return () => {
+      clearTimeout(idleTimer);
+      for (const event of events) {
+        window.removeEventListener(event, bumpActivity);
+      }
+    };
+  }, [user?.id, user?.presence, loadAll]);
 
   const requestPersonalRoomAccess = useCallback(
     (roomId: string, ownerId: string) => {
@@ -926,6 +1251,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       suggestionCategoriesByRoom,
       decisionOptionsByRoom,
       notifications,
+      friendRequests,
+      roomInvites,
+      roomNameChangeRequests,
       roomNicknames,
       nicknameRequests,
       personalRoomAccess,
@@ -934,9 +1262,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       signOut,
       updateAvatar,
       addFriendByEmail,
+      respondToFriendRequest,
       removeFriend,
       deleteAccount,
       leaveRoom,
+      sendRoomInvite,
+      respondToRoomInvite,
+      proposeRoomNameChange: proposeRoomNameChangeHandler,
+      respondToRoomNameChange,
       createRoom,
       setRoomNickname,
       requestNicknameForFriend,
@@ -964,6 +1297,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       notifyRoomDecision,
       pushNotification,
       markNotificationRead,
+      setPresence,
       toggleOnline,
       requestPersonalRoomAccess,
       grantPersonalRoomAccess,
@@ -983,6 +1317,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       suggestionCategoriesByRoom,
       decisionOptionsByRoom,
       notifications,
+      friendRequests,
+      roomInvites,
+      roomNameChangeRequests,
       roomNicknames,
       nicknameRequests,
       personalRoomAccess,
@@ -991,9 +1328,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       signOut,
       updateAvatar,
       addFriendByEmail,
+      respondToFriendRequest,
       removeFriend,
       deleteAccount,
       leaveRoom,
+      sendRoomInvite,
+      respondToRoomInvite,
+      proposeRoomNameChangeHandler,
+      respondToRoomNameChange,
       createRoom,
       setRoomNickname,
       requestNicknameForFriend,
@@ -1021,6 +1363,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       notifyRoomDecision,
       pushNotification,
       markNotificationRead,
+      setPresence,
       toggleOnline,
       requestPersonalRoomAccess,
       grantPersonalRoomAccess,

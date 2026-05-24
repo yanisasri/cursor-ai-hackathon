@@ -2,9 +2,10 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useApp } from "../context/AppContext";
 import { AvatarPreview } from "./AvatarPreview";
+import { presenceDotClass, presenceLabel, type UserPresence } from "../types";
 
 export function Navbar() {
-  const { user, notifications, signOut, markNotificationRead } = useApp();
+  const { user, notifications, signOut, markNotificationRead, setPresence } = useApp();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -85,6 +86,28 @@ export function Navbar() {
             {menuOpen && (
               <div className="absolute right-0 mt-2 w-56 rounded-xl border border-cozy-200 bg-white p-3 shadow-lg">
                 <p className="truncate text-sm text-cozy-600">{user.email}</p>
+                <div className="mt-3">
+                  <p className="text-xs font-medium text-cozy-500">Your status</p>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {(["online", "idle", "offline"] as UserPresence[]).map((status) => (
+                      <button
+                        key={status}
+                        type="button"
+                        className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs ${
+                          user.presence === status
+                            ? "bg-plum-100 font-medium text-plum-800"
+                            : "text-cozy-600 hover:bg-cozy-50"
+                        }`}
+                        onClick={() => setPresence(status)}
+                      >
+                        <span
+                          className={`inline-block h-2 w-2 rounded-full ${presenceDotClass(status)}`}
+                        />
+                        {presenceLabel(status)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <button
                   type="button"
                   className="btn-secondary mt-3 w-full text-sm"

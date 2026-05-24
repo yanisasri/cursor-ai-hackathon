@@ -2,6 +2,7 @@ import { Link, Navigate } from "react-router-dom";
 import { FriendsSidebar } from "../components/FriendsSidebar";
 import { Navbar } from "../components/Navbar";
 import { RoomCard } from "../components/RoomCard";
+import { RoomInvitesPanel } from "../components/RoomInvitesPanel";
 import { useApp } from "../context/AppContext";
 
 export function Home() {
@@ -28,6 +29,8 @@ export function Home() {
             people again.
           </p>
         </section>
+
+        <RoomInvitesPanel />
 
         <div className="flex flex-col gap-8 lg:flex-row">
           <div className="flex-1">

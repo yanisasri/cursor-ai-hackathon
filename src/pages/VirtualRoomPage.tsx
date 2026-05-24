@@ -7,6 +7,7 @@ import { DecisionRoomPanel } from "../components/decision/DecisionRoomPanel";
 import { Navbar } from "../components/Navbar";
 import { PersonalRoomsPanel } from "../components/PersonalRoomsPanel";
 import { RoomNicknamesPanel } from "../components/RoomNicknamesPanel";
+import { RoomSettingsPanel } from "../components/RoomSettingsPanel";
 import { SuggestionsPanel } from "../components/SuggestionsPanel";
 import { VirtualWorld } from "../components/VirtualWorld";
 import { useApp } from "../context/AppContext";
@@ -178,6 +179,7 @@ export function VirtualRoomPage() {
             <div className={panelOpen ? "block" : "hidden lg:block"}>
               {settingsOpen ? (
                 <div className="space-y-4">
+                  <RoomSettingsPanel roomId={room.id} memberIds={displayMemberIds} />
                   <RoomNicknamesPanel roomId={room.id} memberIds={displayMemberIds} />
                   <div className="border-t border-cozy-100 pt-4">
                     <button
