@@ -2,14 +2,18 @@ import { supabase } from "./supabaseClient";
 import type {
   CalendarConnection,
   CalendarEvent,
+  FriendRequest,
   NicknameRequest,
   Notification,
   PersonalRoomAccess,
   Poll,
+  RoomInvite,
   RoomMessage,
+  RoomNameChangeRequest,
   RoomNickname,
   Suggestion,
   User,
+  UserPresence,
   VirtualRoom,
 } from "../types";
 import { DEFAULT_AVATAR, SUGGESTION_CATEGORIES } from "../types";
@@ -20,6 +24,16 @@ function throwIfError(error: { message: string } | null): void {
 
 function inFilter(ids: string[]): string {
   return `(${ids.map((id) => `"${id}"`).join(",")})`;
+}
+
+function friendPair(a: string, b: string): [string, string] {
+  return a < b ? [a, b] : [b, a];
+}
+
+function presenceFromRow(row: Record<string, unknown>): UserPresence {
+  const ps = row.presence_status;
+  if (ps === "online" || ps === "idle" || ps === "offline") return ps;
+  return Boolean(row.is_online) ? "online" : "offline";
 }
 
 function avatarFromDbRow(row: Record<string, unknown>): User["avatar"] {
@@ -116,12 +130,20 @@ export const supabaseApi = {
   },
 
   async getUsers(): Promise<User[]> {
+    let usersResult = await supabase
+      .from("users")
+      .select("id,email,password_hash,display_name,is_online,presence_status");
+    if (usersResult.error?.message?.includes("presence_status")) {
+      usersResult = await supabase
+        .from("users")
+        .select("id,email,password_hash,display_name,is_online");
+    }
     const [
       { data: users, error: usersError },
       { data: avatars, error: avatarsError },
       { data: friendships, error: friendshipsError },
     ] = await Promise.all([
-      supabase.from("users").select("id,email,password_hash,display_name,is_online"),
+      Promise.resolve(usersResult),
       supabase.from("user_avatars").select("*"),
       supabase
         .from("friendships")
@@ -153,6 +175,7 @@ export const supabaseApi = {
 
     return (users ?? []).map((u) => {
       const av = avatarMap.get(String(u.id));
+      const presence = presenceFromRow(u as Record<string, unknown>);
       return {
         id: String(u.id),
         email: String(u.email),
@@ -160,17 +183,27 @@ export const supabaseApi = {
         displayName: String(u.display_name),
         avatar: av?.avatar ?? { ...DEFAULT_AVATAR },
         friendIds: Array.from(friendMap.get(String(u.id)) ?? []),
-        online: Boolean(u.is_online),
+        online: presence !== "offline",
+        presence,
         avatarCustomized: av?.avatarCustomized ?? false,
       };
     });
   },
 
-  async setUserOnline(userId: string, isOnline: boolean): Promise<void> {
+  async setUserPresence(userId: string, presence: UserPresence): Promise<void> {
+    const isOnline = presence !== "offline";
     const { error } = await supabase
       .from("users")
-      .update({ is_online: isOnline })
+      .update({ is_online: isOnline, presence_status: presence })
       .eq("id", userId);
+    if (error?.message?.includes("presence_status")) {
+      const { error: fallbackError } = await supabase
+        .from("users")
+        .update({ is_online: isOnline })
+        .eq("id", userId);
+      throwIfError(fallbackError);
+      return;
+    }
     throwIfError(error);
   },
 
@@ -184,15 +217,75 @@ export const supabaseApi = {
   },
 
   async removeFriendship(userId: string, friendId: string): Promise<void> {
-    const [user_id, friend_id] =
-      userId < friendId ? [userId, friendId] : [friendId, userId];
+    const [user_id, friend_id] = friendPair(userId, friendId);
     const { error } = await supabase
       .from("friendships")
       .delete()
       .eq("user_id", user_id)
-      .eq("friend_id", friend_id)
-      .eq("status", "accepted");
+      .eq("friend_id", friend_id);
     throwIfError(error);
+  },
+
+  async getFriendRequests(): Promise<FriendRequest[]> {
+    const { data, error } = await supabase
+      .from("friendships")
+      .select("user_id,friend_id,status,requested_by,accepted_at")
+      .eq("status", "pending");
+    throwIfError(error);
+    return (data ?? []).map((f) => ({
+      userId: String(f.user_id),
+      friendId: String(f.friend_id),
+      requestedBy: String(f.requested_by),
+      status: "pending" as const,
+      createdAt: f.accepted_at ? String(f.accepted_at) : new Date().toISOString(),
+    }));
+  },
+
+  async createFriendRequest(fromUserId: string, toUserId: string): Promise<void> {
+    const [user_id, friend_id] = friendPair(fromUserId, toUserId);
+    const { data: existing, error: existingError } = await supabase
+      .from("friendships")
+      .select("status")
+      .eq("user_id", user_id)
+      .eq("friend_id", friend_id)
+      .maybeSingle();
+    throwIfError(existingError);
+    if (existing?.status === "accepted") throw new Error("Already friends.");
+    if (existing?.status === "pending") throw new Error("Friend request already pending.");
+
+    const { error } = await supabase.from("friendships").upsert({
+      user_id,
+      friend_id,
+      status: "pending",
+      requested_by: fromUserId,
+      accepted_at: null,
+    });
+    throwIfError(error);
+  },
+
+  async respondFriendRequest(
+    userId: string,
+    otherUserId: string,
+    accept: boolean
+  ): Promise<void> {
+    const [user_id, friend_id] = friendPair(userId, otherUserId);
+    if (accept) {
+      const { error } = await supabase
+        .from("friendships")
+        .update({ status: "accepted", accepted_at: new Date().toISOString() })
+        .eq("user_id", user_id)
+        .eq("friend_id", friend_id)
+        .eq("status", "pending");
+      throwIfError(error);
+    } else {
+      const { error } = await supabase
+        .from("friendships")
+        .delete()
+        .eq("user_id", user_id)
+        .eq("friend_id", friend_id)
+        .eq("status", "pending");
+      throwIfError(error);
+    }
   },
 
   async deleteAccount(userId: string): Promise<void> {
@@ -214,6 +307,15 @@ export const supabaseApi = {
         .or(`from_user_id.eq.${userId},to_user_id.eq.${userId}`),
       supabase.from("notifications").delete().eq("user_id", userId),
       supabase.from("room_messages").delete().eq("user_id", userId),
+      supabase.from("room_invites").delete().or(`from_user_id.eq.${userId},to_user_id.eq.${userId}`),
+      supabase
+        .from("room_name_change_approvals")
+        .delete()
+        .eq("user_id", userId),
+      supabase
+        .from("room_name_change_requests")
+        .delete()
+        .eq("proposed_by_user_id", userId),
       supabase.from("calendar_connections").delete().eq("user_id", userId),
       supabase.from("calendar_event_rsvps").delete().eq("user_id", userId),
       supabase.from("calendar_events").delete().eq("creator_user_id", userId),
@@ -440,6 +542,8 @@ export const supabaseApi = {
       supabase.from("personal_room_access").delete().eq("room_id", roomId),
       supabase.from("personal_room_pending_requests").delete().eq("room_id", roomId),
       supabase.from("suggestion_categories").delete().eq("room_id", roomId),
+      supabase.from("room_invites").delete().eq("room_id", roomId),
+      supabase.from("room_name_change_requests").delete().eq("room_id", roomId),
       supabase.from("room_members").delete().eq("room_id", roomId),
     ];
     for (const query of roomScopedDeletes) {
@@ -1061,5 +1165,219 @@ export const supabaseApi = {
         .insert(pendingRows);
       throwIfError(insertPendingError);
     }
+  },
+
+  async getRoomInvites(): Promise<RoomInvite[]> {
+    const { data, error } = await supabase
+      .from("room_invites")
+      .select("id,room_id,from_user_id,to_user_id,status,created_at")
+      .order("created_at", { ascending: false });
+    throwIfError(error);
+    return (data ?? []).map((i) => ({
+      id: String(i.id),
+      roomId: String(i.room_id),
+      fromUserId: String(i.from_user_id),
+      toUserId: String(i.to_user_id),
+      status: i.status as RoomInvite["status"],
+      createdAt: String(i.created_at),
+    }));
+  },
+
+  async createRoomInvite(roomId: string, fromUserId: string, toUserId: string): Promise<void> {
+    const room = (await this.getRooms()).find((r) => r.id === roomId);
+    if (!room) throw new Error("Room not found.");
+    if (!room.memberIds.includes(fromUserId)) throw new Error("You are not in this room.");
+    if (room.memberIds.includes(toUserId)) throw new Error("They are already in this room.");
+    if (room.memberIds.length >= room.maxMembers) throw new Error("Room is full.");
+
+    const { data: existing, error: existingError } = await supabase
+      .from("room_invites")
+      .select("id")
+      .eq("room_id", roomId)
+      .eq("to_user_id", toUserId)
+      .eq("status", "pending")
+      .maybeSingle();
+    throwIfError(existingError);
+    if (existing) throw new Error("Invite already sent.");
+
+    const { error } = await supabase.from("room_invites").insert({
+      room_id: roomId,
+      from_user_id: fromUserId,
+      to_user_id: toUserId,
+      status: "pending",
+    });
+    throwIfError(error);
+  },
+
+  async respondRoomInvite(inviteId: string, userId: string, accept: boolean): Promise<void> {
+    const { data: invite, error: inviteError } = await supabase
+      .from("room_invites")
+      .select("id,room_id,from_user_id,to_user_id,status")
+      .eq("id", inviteId)
+      .maybeSingle();
+    throwIfError(inviteError);
+    if (!invite) throw new Error("Invite not found.");
+    if (String(invite.to_user_id) !== userId) throw new Error("Not your invite.");
+    if (invite.status !== "pending") throw new Error("Invite already handled.");
+
+    if (accept) {
+      const room = (await this.getRooms()).find((r) => r.id === String(invite.room_id));
+      if (!room) throw new Error("Room no longer exists.");
+      if (room.memberIds.length >= room.maxMembers) throw new Error("Room is full.");
+      const { error: memberError } = await supabase.from("room_members").insert({
+        room_id: invite.room_id,
+        user_id: userId,
+      });
+      throwIfError(memberError);
+    }
+
+    const { error: updateError } = await supabase
+      .from("room_invites")
+      .update({ status: accept ? "accepted" : "declined" })
+      .eq("id", inviteId);
+    throwIfError(updateError);
+  },
+
+  async getRoomNameChangeRequests(): Promise<RoomNameChangeRequest[]> {
+    const { data: requests, error: requestsError } = await supabase
+      .from("room_name_change_requests")
+      .select("id,room_id,proposed_name,proposed_by_user_id,status,created_at")
+      .eq("status", "pending");
+    throwIfError(requestsError);
+    if (!requests || requests.length === 0) return [];
+
+    const requestIds = requests.map((r) => String(r.id));
+    const { data: approvals, error: approvalsError } = await supabase
+      .from("room_name_change_approvals")
+      .select("request_id,user_id,decision")
+      .in("request_id", requestIds);
+    throwIfError(approvalsError);
+
+    return requests.map((r) => {
+      const id = String(r.id);
+      const memberApprovals: Record<string, "pending" | "approved" | "declined"> = {};
+      for (const a of approvals ?? []) {
+        if (String(a.request_id) !== id) continue;
+        memberApprovals[String(a.user_id)] = a.decision as "pending" | "approved" | "declined";
+      }
+      return {
+        id,
+        roomId: String(r.room_id),
+        proposedName: String(r.proposed_name),
+        proposedByUserId: String(r.proposed_by_user_id),
+        status: r.status as RoomNameChangeRequest["status"],
+        memberApprovals,
+        createdAt: String(r.created_at),
+      };
+    });
+  },
+
+  async proposeRoomNameChange(
+    roomId: string,
+    proposedByUserId: string,
+    proposedName: string
+  ): Promise<string> {
+    const room = (await this.getRooms()).find((r) => r.id === roomId);
+    if (!room) throw new Error("Room not found.");
+    if (!room.memberIds.includes(proposedByUserId)) throw new Error("You are not in this room.");
+    const trimmed = proposedName.trim();
+    if (!trimmed) throw new Error("Enter a room name.");
+    if (trimmed === room.name) throw new Error("That is already the room name.");
+
+    const { data: existing, error: existingError } = await supabase
+      .from("room_name_change_requests")
+      .select("id")
+      .eq("room_id", roomId)
+      .eq("status", "pending")
+      .maybeSingle();
+    throwIfError(existingError);
+    if (existing) throw new Error("A name change is already pending approval.");
+
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const { error: insertError } = await supabase.from("room_name_change_requests").insert({
+      id,
+      room_id: roomId,
+      proposed_name: trimmed,
+      proposed_by_user_id: proposedByUserId,
+      status: "pending",
+      created_at: now,
+    });
+    throwIfError(insertError);
+
+    const approvalRows = room.memberIds.map((memberId) => ({
+      request_id: id,
+      user_id: memberId,
+      decision: memberId === proposedByUserId ? "approved" : "pending",
+      decided_at: memberId === proposedByUserId ? now : null,
+    }));
+    const { error: approvalsError } = await supabase
+      .from("room_name_change_approvals")
+      .insert(approvalRows);
+    throwIfError(approvalsError);
+    return id;
+  },
+
+  async respondRoomNameChange(
+    requestId: string,
+    userId: string,
+    approve: boolean
+  ): Promise<{ applied: boolean; roomId: string }> {
+    const { data: request, error: requestError } = await supabase
+      .from("room_name_change_requests")
+      .select("id,room_id,proposed_name,status")
+      .eq("id", requestId)
+      .maybeSingle();
+    throwIfError(requestError);
+    if (!request || request.status !== "pending") throw new Error("Request not found.");
+
+    const roomId = String(request.room_id);
+    const room = (await this.getRooms()).find((r) => r.id === roomId);
+    if (!room || !room.memberIds.includes(userId)) throw new Error("You are not in this room.");
+
+    const now = new Date().toISOString();
+    const decision = approve ? "approved" : "declined";
+    const { error: approvalError } = await supabase
+      .from("room_name_change_approvals")
+      .update({ decision, decided_at: now })
+      .eq("request_id", requestId)
+      .eq("user_id", userId);
+    throwIfError(approvalError);
+
+    const { data: approvals, error: approvalsError } = await supabase
+      .from("room_name_change_approvals")
+      .select("user_id,decision")
+      .eq("request_id", requestId);
+    throwIfError(approvalsError);
+
+    const decisionMap = new Map<string, string>();
+    for (const a of approvals ?? []) {
+      decisionMap.set(String(a.user_id), String(a.decision));
+    }
+
+    if (room.memberIds.some((m) => decisionMap.get(m) === "declined")) {
+      const { error: declineError } = await supabase
+        .from("room_name_change_requests")
+        .update({ status: "declined" })
+        .eq("id", requestId);
+      throwIfError(declineError);
+      return { applied: false, roomId };
+    }
+
+    const allApproved = room.memberIds.every((m) => decisionMap.get(m) === "approved");
+    if (!allApproved) return { applied: false, roomId };
+
+    const { error: roomError } = await supabase
+      .from("rooms")
+      .update({ name: String(request.proposed_name) })
+      .eq("id", roomId);
+    throwIfError(roomError);
+
+    const { error: completeError } = await supabase
+      .from("room_name_change_requests")
+      .update({ status: "approved" })
+      .eq("id", requestId);
+    throwIfError(completeError);
+    return { applied: true, roomId };
   },
 };

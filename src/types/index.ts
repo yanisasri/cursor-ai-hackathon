@@ -49,6 +49,8 @@ export const AVATAR_LIMITS = {
   earrings: 3,
 } as const;
 
+export type UserPresence = "online" | "idle" | "offline";
+
 export interface User {
   id: string;
   email: string;
@@ -56,8 +58,59 @@ export interface User {
   displayName: string;
   avatar: AvatarConfig;
   friendIds: string[];
+  /** @deprecated use presence — kept for compatibility */
   online: boolean;
+  presence: UserPresence;
   avatarCustomized?: boolean;
+}
+
+export interface FriendRequest {
+  userId: string;
+  friendId: string;
+  requestedBy: string;
+  status: "pending";
+  createdAt: string;
+}
+
+export interface RoomInvite {
+  id: string;
+  roomId: string;
+  fromUserId: string;
+  toUserId: string;
+  status: "pending" | "accepted" | "declined";
+  createdAt: string;
+}
+
+export interface RoomNameChangeRequest {
+  id: string;
+  roomId: string;
+  proposedName: string;
+  proposedByUserId: string;
+  status: "pending" | "approved" | "declined";
+  memberApprovals: Record<string, "pending" | "approved" | "declined">;
+  createdAt: string;
+}
+
+export function presenceLabel(presence: UserPresence): string {
+  switch (presence) {
+    case "online":
+      return "Online";
+    case "idle":
+      return "Idle";
+    default:
+      return "Offline";
+  }
+}
+
+export function presenceDotClass(presence: UserPresence): string {
+  switch (presence) {
+    case "online":
+      return "bg-green-500";
+    case "idle":
+      return "bg-amber-400";
+    default:
+      return "bg-cozy-300";
+  }
 }
 
 export type RoomArea = "house" | "office" | "cafe" | "park";
@@ -209,7 +262,7 @@ export interface Poll {
 export interface Notification {
   id: string;
   userId: string;
-  type: "hangout" | "calendar" | "decision";
+  type: "hangout" | "calendar" | "decision" | "friend" | "room";
   title: string;
   message: string;
   read: boolean;
