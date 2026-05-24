@@ -338,6 +338,103 @@ export async function savePersonalRoomAccess(access: PersonalRoomAccess[]): Prom
   await supabaseApi.savePersonalRoomAccess(merged);
 }
 
+export async function addPersonalRoomPendingRequest(
+  roomId: string,
+  ownerId: string,
+  requesterUserId: string,
+  requestedAt: string
+): Promise<void> {
+  try {
+    await supabaseApi.upsertPersonalRoomPendingRequest(
+      roomId,
+      ownerId,
+      requesterUserId,
+      requestedAt
+    );
+  } catch {
+    const all = await getPersonalRoomAccess();
+    const idx = all.findIndex((a) => a.roomId === roomId && a.ownerId === ownerId);
+    if (idx < 0) return;
+    const entry = all[idx];
+    if (entry.pendingRequests.some((r) => r.userId === requesterUserId)) return;
+    const updated = [...all];
+    updated[idx] = {
+      ...entry,
+      pendingRequests: [...entry.pendingRequests, { userId: requesterUserId, requestedAt }],
+    };
+    await savePersonalRoomAccess(updated);
+  }
+}
+
+export async function removePersonalRoomPendingRequest(
+  roomId: string,
+  ownerId: string,
+  requesterUserId: string
+): Promise<void> {
+  try {
+    await supabaseApi.deletePersonalRoomPendingRequest(roomId, ownerId, requesterUserId);
+  } catch {
+    const all = await getPersonalRoomAccess();
+    const idx = all.findIndex((a) => a.roomId === roomId && a.ownerId === ownerId);
+    if (idx < 0) return;
+    const entry = all[idx];
+    const updated = [...all];
+    updated[idx] = {
+      ...entry,
+      pendingRequests: entry.pendingRequests.filter((r) => r.userId !== requesterUserId),
+    };
+    await savePersonalRoomAccess(updated);
+  }
+}
+
+export async function grantPersonalRoomAccessEntry(
+  roomId: string,
+  ownerId: string,
+  grantUserId: string
+): Promise<void> {
+  try {
+    await supabaseApi.deletePersonalRoomPendingRequest(roomId, ownerId, grantUserId);
+    await supabaseApi.insertPersonalRoomGranted(roomId, ownerId, grantUserId);
+  } catch {
+    const all = await getPersonalRoomAccess();
+    const idx = all.findIndex((a) => a.roomId === roomId && a.ownerId === ownerId);
+    if (idx < 0) return;
+    const entry = all[idx];
+    const updated = [...all];
+    updated[idx] = {
+      ...entry,
+      grantedIds: [...new Set([...entry.grantedIds, grantUserId])],
+      pendingRequests: entry.pendingRequests.filter((r) => r.userId !== grantUserId),
+    };
+    await savePersonalRoomAccess(updated);
+  }
+}
+
+export async function revokePersonalRoomGuest(
+  roomId: string,
+  ownerId: string,
+  guestUserId: string
+): Promise<void> {
+  try {
+    await supabaseApi.removePersonalRoomGranted(roomId, ownerId, guestUserId);
+  } catch {
+    const all = await getPersonalRoomAccess();
+    const idx = all.findIndex((a) => a.roomId === roomId && a.ownerId === ownerId);
+    if (idx < 0) return;
+    const entry = all[idx];
+    const updated = [...all];
+    updated[idx] = {
+      ...entry,
+      grantedIds: entry.grantedIds.filter((id) => id !== guestUserId),
+    };
+    await savePersonalRoomAccess(updated);
+  }
+}
+
+export async function refreshPersonalRoomAccessFromDb(): Promise<PersonalRoomAccess[]> {
+  return getPersonalRoomAccess();
+}
+
 export async function getMailboxNotes(): Promise<MailboxNote[]> {
   try {
     const notes = await supabaseApi.getMailboxNotes();

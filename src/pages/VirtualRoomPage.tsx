@@ -40,6 +40,7 @@ export function VirtualRoomPage() {
     getRoomDisplayName,
     canEnterPersonalRoom,
     refresh,
+    refreshPersonalRoomAccess,
     requestPersonalRoomAccess,
     sendMailboxNote,
     mailboxNotes,
@@ -66,8 +67,15 @@ export function VirtualRoomPage() {
 
   useEffect(() => {
     const interval = window.setInterval(() => {
+      void refreshPersonalRoomAccess();
+    }, 1500);
+    return () => window.clearInterval(interval);
+  }, [refreshPersonalRoomAccess]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
       void refresh();
-    }, 2000);
+    }, 8000);
     return () => window.clearInterval(interval);
   }, [refresh]);
 
@@ -473,7 +481,13 @@ export function VirtualRoomPage() {
                       </button>
                     </div>
                   )}
-                  <PersonalRoomAccessAlerts roomId={room.id} />
+                  <PersonalRoomAccessAlerts
+                    roomId={room.id}
+                    onNewDoorbell={() => {
+                      setPanelOpen(true);
+                      setSettingsOpen(false);
+                    }}
+                  />
                   {ownMailboxOpen && (
                     <div className="mb-3 rounded-xl border border-sky-200 bg-sky-50/50 p-3">
                       <div className="mb-2 flex items-center justify-between gap-2">

@@ -1168,6 +1168,80 @@ export const supabaseApi = {
     }
   },
 
+  async upsertPersonalRoomPendingRequest(
+    roomId: string,
+    ownerId: string,
+    requesterUserId: string,
+    requestedAt: string
+  ): Promise<void> {
+    const { error: deleteError } = await supabase
+      .from("personal_room_pending_requests")
+      .delete()
+      .eq("room_id", roomId)
+      .eq("owner_id", ownerId)
+      .eq("requester_user_id", requesterUserId);
+    throwIfError(deleteError);
+
+    const { error: insertError } = await supabase.from("personal_room_pending_requests").insert({
+      room_id: roomId,
+      owner_id: ownerId,
+      requester_user_id: requesterUserId,
+      requested_at: requestedAt,
+    });
+    throwIfError(insertError);
+  },
+
+  async deletePersonalRoomPendingRequest(
+    roomId: string,
+    ownerId: string,
+    requesterUserId: string
+  ): Promise<void> {
+    const { error } = await supabase
+      .from("personal_room_pending_requests")
+      .delete()
+      .eq("room_id", roomId)
+      .eq("owner_id", ownerId)
+      .eq("requester_user_id", requesterUserId);
+    throwIfError(error);
+  },
+
+  async insertPersonalRoomGranted(
+    roomId: string,
+    ownerId: string,
+    grantedUserId: string
+  ): Promise<void> {
+    const { data: existing, error: existingError } = await supabase
+      .from("personal_room_access")
+      .select("granted_user_id")
+      .eq("room_id", roomId)
+      .eq("owner_id", ownerId)
+      .eq("granted_user_id", grantedUserId)
+      .maybeSingle();
+    throwIfError(existingError);
+    if (existing) return;
+
+    const { error } = await supabase.from("personal_room_access").insert({
+      room_id: roomId,
+      owner_id: ownerId,
+      granted_user_id: grantedUserId,
+    });
+    throwIfError(error);
+  },
+
+  async removePersonalRoomGranted(
+    roomId: string,
+    ownerId: string,
+    grantedUserId: string
+  ): Promise<void> {
+    const { error } = await supabase
+      .from("personal_room_access")
+      .delete()
+      .eq("room_id", roomId)
+      .eq("owner_id", ownerId)
+      .eq("granted_user_id", grantedUserId);
+    throwIfError(error);
+  },
+
   async getRoomInvites(): Promise<RoomInvite[]> {
     const { data, error } = await supabase
       .from("room_invites")

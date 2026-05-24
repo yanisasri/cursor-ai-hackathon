@@ -1,17 +1,29 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import { playDoorbellSound } from "../lib/doorbellSound";
 import { isPersonalRoomFull } from "../types";
 
 interface Props {
   roomId: string;
+  onNewDoorbell?: () => void;
 }
 
-function requestKey(roomId: string, ownerId: string, userId: string, requestedAt: string): string {
+interface DoorbellAlert {
+  key: string;
+  requesterId: string;
+  requestedAt: string;
+}
+
+function requestKey(
+  roomId: string,
+  ownerId: string,
+  userId: string,
+  requestedAt: string
+): string {
   return `${roomId}:${ownerId}:${userId}:${requestedAt}`;
 }
 
-export function PersonalRoomAccessAlerts({ roomId }: Props) {
+export function PersonalRoomAccessAlerts({ roomId, onNewDoorbell }: Props) {
   const {
     user,
     users,
@@ -21,104 +33,130 @@ export function PersonalRoomAccessAlerts({ roomId }: Props) {
     denyPersonalRoomAccess,
   } = useApp();
 
-  const seenRequestsRef = useRef<Set<string>>(new Set());
+  const [alerts, setAlerts] = useState<DoorbellAlert[]>([]);
+  const seenKeysRef = useRef<Set<string>>(new Set());
   const seededRef = useRef(false);
 
   useEffect(() => {
     seededRef.current = false;
-    seenRequestsRef.current = new Set();
+    seenKeysRef.current = new Set();
+    setAlerts([]);
   }, [roomId]);
 
   useEffect(() => {
     if (!user) return;
 
-    const seedKeys = new Set<string>();
+    const incoming: DoorbellAlert[] = [];
     for (const access of personalRoomAccess) {
-      if (access.roomId !== roomId) continue;
+      if (access.roomId !== roomId || access.ownerId !== user.id) continue;
       for (const req of access.pendingRequests) {
-        seedKeys.add(requestKey(roomId, access.ownerId, req.userId, req.requestedAt));
+        incoming.push({
+          key: requestKey(roomId, access.ownerId, req.userId, req.requestedAt),
+          requesterId: req.userId,
+          requestedAt: req.requestedAt,
+        });
       }
     }
 
     if (!seededRef.current) {
-      seenRequestsRef.current = seedKeys;
+      for (const alert of incoming) {
+        seenKeysRef.current.add(alert.key);
+      }
       seededRef.current = true;
+      if (incoming.length > 0) {
+        setAlerts(incoming);
+      }
       return;
     }
 
-    for (const key of seedKeys) {
-      if (seenRequestsRef.current.has(key)) continue;
-      seenRequestsRef.current.add(key);
-
-      const access = personalRoomAccess.find(
-        (a) =>
-          a.roomId === roomId &&
-          a.pendingRequests.some(
-            (r) => requestKey(roomId, a.ownerId, r.userId, r.requestedAt) === key
-          )
-      );
-      if (access?.ownerId === user.id) {
-        playDoorbellSound();
-      }
+    let addedNew = false;
+    for (const alert of incoming) {
+      if (seenKeysRef.current.has(alert.key)) continue;
+      seenKeysRef.current.add(alert.key);
+      addedNew = true;
     }
-  }, [personalRoomAccess, roomId, user]);
 
-  if (!user) return null;
+    if (addedNew) {
+      playDoorbellSound();
+      onNewDoorbell?.();
+    }
 
-  const myOwnedAccess = personalRoomAccess.filter(
-    (a) => a.roomId === roomId && a.ownerId === user.id && a.pendingRequests.length > 0
-  );
+    setAlerts((prev) => {
+      const byKey = new Map(prev.map((a) => [a.key, a]));
+      for (const alert of incoming) {
+        if (!byKey.has(alert.key)) {
+          byKey.set(alert.key, alert);
+        }
+      }
+      return [...byKey.values()];
+    });
+  }, [personalRoomAccess, roomId, user, onNewDoorbell]);
 
-  if (myOwnedAccess.length === 0) return null;
+  if (!user || alerts.length === 0) return null;
 
   const displayName = (userId: string) =>
     getRoomDisplayName(roomId, userId) ||
     users.find((u) => u.id === userId)?.displayName ||
     "Friend";
 
+  const myAccess = personalRoomAccess.find(
+    (a) => a.roomId === roomId && a.ownerId === user.id
+  );
+  const full = myAccess ? isPersonalRoomFull(myAccess) : false;
+
+  const dismissAlert = (key: string) => {
+    setAlerts((prev) => prev.filter((a) => a.key !== key));
+  };
+
   return (
-    <div className="space-y-2 border-b border-cozy-100 pb-3">
-      <p className="text-xs font-semibold uppercase tracking-wide text-plum-700">
-        Personal room visits
+    <div className="sticky top-0 z-20 mb-3 space-y-2 rounded-xl border-2 border-amber-400 bg-amber-50 p-3 shadow-md">
+      <p className="text-xs font-semibold uppercase tracking-wide text-amber-900">
+        Someone at your door
       </p>
 
-      {myOwnedAccess.flatMap((access) =>
-        access.pendingRequests.map((req) => {
-          const requesterName = displayName(req.userId);
-          const full = isPersonalRoomFull(access);
-          return (
-            <div
-              key={requestKey(roomId, access.ownerId, req.userId, req.requestedAt)}
-              className="rounded-xl border-2 border-amber-300 bg-amber-50 p-3 shadow-sm"
-            >
-              <p className="text-sm font-semibold text-cozy-900">Someone at your door</p>
-              <p className="mt-1 text-xs text-cozy-600">
-                <span className="font-medium">{requesterName}</span> wants to enter your personal
-                room.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className="rounded-lg bg-plum-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-plum-700 disabled:opacity-50"
-                  disabled={full}
-                  onClick={() => {
-                    const result = grantPersonalRoomAccess(roomId, access.ownerId, req.userId);
-                    if (!result.ok && result.error) alert(result.error);
-                  }}
-                >
-                  Allow
-                </button>
-                <button
-                  type="button"
-                  className="rounded-lg border border-cozy-300 bg-white px-3 py-1.5 text-xs font-medium text-cozy-800 hover:bg-cozy-50"
-                  onClick={() => denyPersonalRoomAccess(roomId, access.ownerId, req.userId)}
-                >
-                  Deny
-                </button>
-              </div>
+      {alerts.map((alert) => {
+        const requesterName = displayName(alert.requesterId);
+        return (
+          <div
+            key={alert.key}
+            className="rounded-xl border border-amber-300 bg-white p-3 shadow-sm"
+          >
+            <p className="text-sm font-semibold text-cozy-900">{requesterName} is visiting</p>
+            <p className="mt-1 text-xs text-cozy-600">
+              Allow them into your personal room, or deny the visit.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="rounded-lg bg-plum-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-plum-700 disabled:opacity-50"
+                disabled={full}
+                onClick={() => {
+                  const result = grantPersonalRoomAccess(roomId, user.id, alert.requesterId);
+                  if (result.ok) dismissAlert(alert.key);
+                  else if (result.error) alert(result.error);
+                }}
+              >
+                Allow in
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-cozy-300 bg-white px-3 py-1.5 text-xs font-medium text-cozy-800 hover:bg-cozy-50"
+                onClick={() => {
+                  denyPersonalRoomAccess(roomId, user.id, alert.requesterId);
+                  dismissAlert(alert.key);
+                }}
+              >
+                Deny
+              </button>
             </div>
-          );
-        })
+          </div>
+        );
+      })}
+
+      {full && (
+        <p className="text-[11px] text-amber-800">
+          Your room is full — a guest must leave before you can allow someone new in.
+        </p>
       )}
     </div>
   );

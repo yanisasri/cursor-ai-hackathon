@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   appendMailboxNote,
+  addPersonalRoomPendingRequest,
   createRoomRecord,
   createUser,
   createFriendRequest,
@@ -24,6 +25,7 @@ import {
   getNotifications,
   getMailboxNotes,
   getPersonalRoomAccess,
+  grantPersonalRoomAccessEntry,
   getPolls,
   getRoomInvites,
   getRoomNameChangeRequests,
@@ -37,7 +39,9 @@ import {
   leaveRoom as leaveRoomRecord,
   proposeRoomNameChange,
   removeFriendship,
+  removePersonalRoomPendingRequest,
   respondFriendRequest as respondFriendRequestDb,
+  revokePersonalRoomGuest,
   respondRoomInvite,
   respondRoomNameChange as respondRoomNameChangeDb,
   saveCalendarConnections,
@@ -57,6 +61,7 @@ import {
   upsertUserAvatars,
   verifyCredentials,
 } from "../lib/storage";
+import { mergePersonalRoomAccessLists } from "../lib/personalRoomAccessMerge";
 import {
   MAX_ROOM_MEMBERS,
   SUGGESTION_CATEGORIES,
@@ -149,6 +154,7 @@ interface AppContextValue {
   respondNicknameRequest: (id: string, accept: boolean) => void;
   getRoomDisplayName: (roomId: string, userId: string) => string;
   refresh: () => Promise<void>;
+  refreshPersonalRoomAccess: () => Promise<void>;
   addCalendarSlot: (slot: Omit<CalendarSlot, "id">) => void;
   addCalendarEvent: (event: Omit<CalendarEvent, "id">) => void;
   createCalendarEventRequest: (event: Omit<CalendarEvent, "id">) => void;
@@ -284,7 +290,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setRoomNameChangeRequests(allRoomNameChanges);
     setRoomNicknames(allNicknames);
     setNicknameRequests(allNicknameRequests);
-    setPersonalRoomAccess(allPersonalAccess);
+    setPersonalRoomAccess((prev) => mergePersonalRoomAccessLists(allPersonalAccess, prev));
     setMailboxNotes(allMailboxNotes);
     if (sessionId) {
       const found = allUsers.find((u) => u.id === sessionId) ?? null;
@@ -299,6 +305,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  const refreshPersonalRoomAccess = useCallback(async () => {
+    try {
+      const latest = await getPersonalRoomAccess();
+      setPersonalRoomAccess((prev) => mergePersonalRoomAccessLists(latest, prev));
+    } catch {
+      /* keep local state */
+    }
+  }, []);
 
   /** Best-effort — social notifications use friend/room types that need DB migration. */
   const appendNotifications = useCallback(
@@ -1195,19 +1210,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (isPersonalRoomFull(entry)) {
         return { ok: false, error: "This personal room is full (owner + 1 guest)." };
       }
+      const requestedAt = new Date().toISOString();
       const updated = [...all];
       updated[idx] = {
         ...entry,
-        pendingRequests: [
-          ...entry.pendingRequests,
-          { userId: user.id, requestedAt: new Date().toISOString() },
-        ],
+        pendingRequests: [...entry.pendingRequests, { userId: user.id, requestedAt }],
       };
       setPersonalRoomAccess(updated);
-      void savePersonalRoomAccess(updated).then(() => loadAll());
+      void addPersonalRoomPendingRequest(roomId, ownerId, user.id, requestedAt);
       return { ok: true };
     },
-    [user, personalRoomAccess, loadAll]
+    [user, personalRoomAccess]
   );
 
   const grantPersonalRoomAccess = useCallback(
@@ -1227,10 +1240,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         pendingRequests: entry.pendingRequests.filter((r) => r.userId !== grantUserId),
       };
       setPersonalRoomAccess(updated);
-      void savePersonalRoomAccess(updated).then(() => loadAll());
+      void grantPersonalRoomAccessEntry(roomId, ownerId, grantUserId);
       return { ok: true };
     },
-    [personalRoomAccess, loadAll]
+    [personalRoomAccess]
   );
 
   const denyPersonalRoomAccess = useCallback(
@@ -1245,9 +1258,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         pendingRequests: entry.pendingRequests.filter((r) => r.userId !== denyUserId),
       };
       setPersonalRoomAccess(updated);
-      void savePersonalRoomAccess(updated).then(() => loadAll());
+      void removePersonalRoomPendingRequest(roomId, ownerId, denyUserId);
     },
-    [personalRoomAccess, loadAll]
+    [personalRoomAccess]
   );
 
   const leavePersonalRoom = useCallback(
@@ -1263,9 +1276,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ...entry,
         grantedIds: entry.grantedIds.filter((id) => id !== user.id),
       };
-      void savePersonalRoomAccess(updated).then(() => loadAll());
+      setPersonalRoomAccess(updated);
+      void revokePersonalRoomGuest(roomId, ownerId, user.id);
     },
-    [user, personalRoomAccess, loadAll]
+    [user, personalRoomAccess]
   );
 
   const canEnterPersonalRoom = useCallback(
@@ -1386,6 +1400,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       respondNicknameRequest,
       getRoomDisplayName,
       refresh: loadAll,
+      refreshPersonalRoomAccess,
       addCalendarSlot,
       addCalendarEvent,
       createCalendarEventRequest,
@@ -1456,6 +1471,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       respondNicknameRequest,
       getRoomDisplayName,
       loadAll,
+      refreshPersonalRoomAccess,
       addCalendarSlot,
       addCalendarEvent,
       createCalendarEventRequest,
