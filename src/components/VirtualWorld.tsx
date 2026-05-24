@@ -21,6 +21,7 @@ interface Props {
   onEnterSubRoom: (zone: SubRoomType, ownerId?: string) => void;
   onPersonalRoomVisit?: (ownerId: string) => void;
   onClearPersonalRoomVisit?: () => void;
+  onOpenOwnMailbox?: () => void;
   onPersonalRoomHover?: (ownerId: string) => void;
   onPersonalRoomHoverEnd?: () => void;
   voiceContext?: VoiceContextProps | null;
@@ -561,6 +562,7 @@ export function VirtualWorld({
   onEnterSubRoom,
   onPersonalRoomVisit,
   onClearPersonalRoomVisit,
+  onOpenOwnMailbox,
   onPersonalRoomHover,
   onPersonalRoomHoverEnd,
   voiceContext,
@@ -577,6 +579,7 @@ export function VirtualWorld({
   const [others, setOthers] = useState<Player[]>([]);
   const heldKeysRef = useHeldKeys(true);
   const lastZoneRef = useRef<string | null>(null);
+  const leaveZoneTimerRef = useRef<number | null>(null);
 
   const worldH = useMemo(() => getWorldHeight(memberIds.length), [memberIds.length]);
 
@@ -667,6 +670,11 @@ export function VirtualWorld({
         pos.y >= z.y &&
         pos.y <= z.y + z.h
       ) {
+        if (leaveZoneTimerRef.current != null) {
+          window.clearTimeout(leaveZoneTimerRef.current);
+          leaveZoneTimerRef.current = null;
+        }
+
         const zoneKey =
           z.type === "personal" && "ownerId" in z ? `personal:${z.ownerId}` : z.type;
         if (lastZoneRef.current !== zoneKey) {
@@ -677,8 +685,8 @@ export function VirtualWorld({
             onEnterSubRoom("personal", ownerId);
             if (user && ownerId !== user.id) {
               onPersonalRoomVisit?.(ownerId);
-            } else {
-              onClearPersonalRoomVisit?.();
+            } else if (user && ownerId === user.id) {
+              onOpenOwnMailbox?.();
             }
           } else {
             onEnterSubRoom(z.type);
@@ -688,9 +696,24 @@ export function VirtualWorld({
         return;
       }
     }
-    lastZoneRef.current = null;
-    onClearPersonalRoomVisit?.();
-  }, [pos, onEnterSubRoom, onClearPersonalRoomVisit, onPersonalRoomVisit, personalZones, roomId, user]);
+
+    if (leaveZoneTimerRef.current != null) return;
+
+    leaveZoneTimerRef.current = window.setTimeout(() => {
+      leaveZoneTimerRef.current = null;
+      lastZoneRef.current = null;
+      onClearPersonalRoomVisit?.();
+    }, 450);
+  }, [pos, onEnterSubRoom, onClearPersonalRoomVisit, onOpenOwnMailbox, onPersonalRoomVisit, personalZones, user]);
+
+  useEffect(
+    () => () => {
+      if (leaveZoneTimerRef.current != null) {
+        window.clearTimeout(leaveZoneTimerRef.current);
+      }
+    },
+    []
+  );
 
   const goToZone = (z: {
     type: SubRoomType;
@@ -867,7 +890,11 @@ export function VirtualWorld({
               type="button"
               onClick={() => {
                 goToZone(z);
-                if (!isOwner) onPersonalRoomVisit?.(z.ownerId);
+                if (isOwner) {
+                  onOpenOwnMailbox?.();
+                } else {
+                  onPersonalRoomVisit?.(z.ownerId);
+                }
               }}
               onMouseEnter={() => {
                 if (!isOwner) onPersonalRoomHover?.(z.ownerId);

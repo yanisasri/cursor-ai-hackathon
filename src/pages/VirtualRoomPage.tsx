@@ -9,6 +9,7 @@ import { PersonalRoomsPanel } from "../components/PersonalRoomsPanel";
 import { PersonalRoomAccessAlerts } from "../components/PersonalRoomAccessAlerts";
 import { PersonalRoomVisitPanel } from "../components/PersonalRoomVisitPanel";
 import { MailboxNoteComposer } from "../components/mailbox/MailboxNoteComposer";
+import { MailboxInboxPanel } from "../components/mailbox/MailboxInboxPanel";
 import { MailboxSendAnimation } from "../components/mailbox/MailboxSendAnimation";
 import { RoomNicknamesPanel } from "../components/RoomNicknamesPanel";
 import { RoomSettingsPanel } from "../components/RoomSettingsPanel";
@@ -46,6 +47,7 @@ export function VirtualRoomPage() {
   const [activeSubRoom, setActiveSubRoom] = useState<SubRoomType>("living");
   const [activePersonalOwner, setActivePersonalOwner] = useState<string | null>(null);
   const [sidebarVisitOwnerId, setSidebarVisitOwnerId] = useState<string | null>(null);
+  const [ownMailboxOpen, setOwnMailboxOpen] = useState(false);
   const visitPinnedRef = useRef(false);
   const hoverSidebarTimerRef = useRef<number | null>(null);
   const [mailboxComposeOwnerId, setMailboxComposeOwnerId] = useState<string | null>(null);
@@ -65,7 +67,7 @@ export function VirtualRoomPage() {
   useEffect(() => {
     const interval = window.setInterval(() => {
       void refresh();
-    }, 4000);
+    }, 2000);
     return () => window.clearInterval(interval);
   }, [refresh]);
 
@@ -211,15 +213,28 @@ export function VirtualRoomPage() {
     setActiveSubRoom("personal");
     setActivePersonalOwner(ownerId);
     setPanelOpen(true);
+    setSettingsOpen(false);
     const result = requestPersonalRoomAccess(room.id, ownerId);
     if (result.ok) playDoorbellSound();
     else if (result.error) alert(result.error);
+  };
+
+  const openOwnMailbox = () => {
+    visitPinnedRef.current = true;
+    clearHoverSidebarTimer();
+    setSidebarVisitOwnerId(null);
+    setOwnMailboxOpen(true);
+    setActiveSubRoom("personal");
+    setActivePersonalOwner(user.id);
+    setPanelOpen(true);
+    setSettingsOpen(false);
   };
 
   const handlePersonalRoomVisit = (ownerId: string) => {
     visitPinnedRef.current = true;
     clearHoverSidebarTimer();
     setSidebarVisitOwnerId(ownerId);
+    setOwnMailboxOpen(false);
     setActiveSubRoom("personal");
     setActivePersonalOwner(ownerId);
     setPanelOpen(true);
@@ -228,21 +243,35 @@ export function VirtualRoomPage() {
 
   const handlePersonalRoomHover = (ownerId: string) => {
     clearHoverSidebarTimer();
-    if (!visitPinnedRef.current) setSidebarVisitOwnerId(ownerId);
+    if (!visitPinnedRef.current) {
+      setSidebarVisitOwnerId(ownerId);
+      setOwnMailboxOpen(false);
+    }
     setPanelOpen(true);
     setSettingsOpen(false);
+  };
+
+  const hasPendingVisitRequest = (ownerId: string | null) => {
+    if (!user || !ownerId) return false;
+    const access = personalRoomAccess.find(
+      (a) => a.roomId === room.id && a.ownerId === ownerId
+    );
+    return access?.pendingRequests.some((r) => r.userId === user.id) ?? false;
+  };
+
+  const handleClearPersonalRoomVisit = () => {
+    if (hasPendingVisitRequest(sidebarVisitOwnerId)) return;
+    visitPinnedRef.current = false;
+    setSidebarVisitOwnerId(null);
   };
 
   const handlePersonalRoomHoverEnd = () => {
     clearHoverSidebarTimer();
     hoverSidebarTimerRef.current = window.setTimeout(() => {
-      if (!visitPinnedRef.current) setSidebarVisitOwnerId(null);
+      if (!visitPinnedRef.current && !hasPendingVisitRequest(sidebarVisitOwnerId)) {
+        setSidebarVisitOwnerId(null);
+      }
     }, 400);
-  };
-
-  const handleClearPersonalRoomVisit = () => {
-    visitPinnedRef.current = false;
-    setSidebarVisitOwnerId(null);
   };
 
   const dismissSidebarVisit = () => {
@@ -376,6 +405,7 @@ export function VirtualRoomPage() {
               }}
               onPersonalRoomVisit={handlePersonalRoomVisit}
               onClearPersonalRoomVisit={handleClearPersonalRoomVisit}
+              onOpenOwnMailbox={openOwnMailbox}
               onPersonalRoomHover={handlePersonalRoomHover}
               onPersonalRoomHoverEnd={handlePersonalRoomHoverEnd}
               voiceContext={
@@ -418,6 +448,16 @@ export function VirtualRoomPage() {
                 </div>
               ) : (
                 <>
+                  <div className="mb-3 flex items-center justify-between gap-2 border-b border-cozy-100 pb-2">
+                    <button
+                      type="button"
+                      className="text-xs font-semibold text-sky-800 underline"
+                      onClick={openOwnMailbox}
+                    >
+                      📬 Your mailbox
+                      {myUnreadMailboxCount > 0 ? ` (${myUnreadMailboxCount} new)` : ""}
+                    </button>
+                  </div>
                   {myUnreadMailboxCount > 0 && (
                     <div className="mb-3 rounded-xl border-2 border-sky-300 bg-sky-50 p-3">
                       <p className="text-sm font-semibold text-cozy-900">
@@ -427,14 +467,28 @@ export function VirtualRoomPage() {
                       <button
                         type="button"
                         className="btn-primary mt-2 text-xs"
-                        onClick={() => {
-                          setActiveSubRoom("personal");
-                          setActivePersonalOwner(user.id);
-                          setPanelOpen(true);
-                        }}
+                        onClick={openOwnMailbox}
                       >
                         Open mailbox
                       </button>
+                    </div>
+                  )}
+                  <PersonalRoomAccessAlerts roomId={room.id} />
+                  {ownMailboxOpen && (
+                    <div className="mb-3 rounded-xl border border-sky-200 bg-sky-50/50 p-3">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-sky-800">
+                          Your mailbox
+                        </p>
+                        <button
+                          type="button"
+                          className="text-xs text-cozy-500 underline"
+                          onClick={() => setOwnMailboxOpen(false)}
+                        >
+                          Close
+                        </button>
+                      </div>
+                      <MailboxInboxPanel roomId={room.id} ownerId={user.id} />
                     </div>
                   )}
                   <div
@@ -455,7 +509,6 @@ export function VirtualRoomPage() {
                         onRingDoorbell={handleRingDoorbell}
                       />
                     )}
-                    <PersonalRoomAccessAlerts roomId={room.id} />
                   </div>
                   {mailboxComposeOwnerId && (
                     <>

@@ -284,7 +284,58 @@ export async function getPersonalRoomAccess(): Promise<PersonalRoomAccess[]> {
 }
 
 export async function savePersonalRoomAccess(access: PersonalRoomAccess[]): Promise<void> {
-  await supabaseApi.savePersonalRoomAccess(access);
+  const accessKey = (a: { roomId: string; ownerId: string }) => `${a.roomId}:${a.ownerId}`;
+
+  let latest: PersonalRoomAccess[] = [];
+  try {
+    latest = await supabaseApi.getPersonalRoomAccess();
+  } catch {
+    latest = [];
+  }
+
+  const latestMap = new Map(latest.map((a) => [accessKey(a), a]));
+  const incomingKeys = new Set(access.map((a) => accessKey(a)));
+
+  const merged: PersonalRoomAccess[] = access.map((inc) => {
+    const lat = latestMap.get(accessKey(inc));
+    if (!lat) return inc;
+
+    const pendingByUser = new Map<string, { userId: string; requestedAt: string }>();
+    for (const req of lat.pendingRequests) {
+      pendingByUser.set(req.userId, req);
+    }
+    for (const req of inc.pendingRequests) {
+      pendingByUser.set(req.userId, req);
+    }
+    for (const userId of inc.grantedIds) {
+      if (!lat.grantedIds.includes(userId)) {
+        pendingByUser.delete(userId);
+      }
+    }
+
+    const latUserIds = new Set(lat.pendingRequests.map((r) => r.userId));
+    const incUserIds = new Set(inc.pendingRequests.map((r) => r.userId));
+    const pendingSubsetRemoval =
+      lat.pendingRequests.length > inc.pendingRequests.length &&
+      [...incUserIds].every((id) => latUserIds.has(id)) &&
+      inc.grantedIds.length === lat.grantedIds.length;
+
+    return {
+      ...inc,
+      grantedIds: [...new Set([inc.ownerId, ...inc.grantedIds])],
+      pendingRequests: pendingSubsetRemoval
+        ? inc.pendingRequests
+        : [...pendingByUser.values()],
+    };
+  });
+
+  for (const lat of latest) {
+    if (!incomingKeys.has(accessKey(lat))) {
+      merged.push(lat);
+    }
+  }
+
+  await supabaseApi.savePersonalRoomAccess(merged);
 }
 
 export async function getMailboxNotes(): Promise<MailboxNote[]> {

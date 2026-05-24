@@ -1203,6 +1203,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           { userId: user.id, requestedAt: new Date().toISOString() },
         ],
       };
+      setPersonalRoomAccess(updated);
       void savePersonalRoomAccess(updated).then(() => loadAll());
       return { ok: true };
     },
@@ -1225,6 +1226,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         grantedIds: [...new Set([...entry.grantedIds, grantUserId])],
         pendingRequests: entry.pendingRequests.filter((r) => r.userId !== grantUserId),
       };
+      setPersonalRoomAccess(updated);
       void savePersonalRoomAccess(updated).then(() => loadAll());
       return { ok: true };
     },
@@ -1242,6 +1244,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ...entry,
         pendingRequests: entry.pendingRequests.filter((r) => r.userId !== denyUserId),
       };
+      setPersonalRoomAccess(updated);
       void savePersonalRoomAccess(updated).then(() => loadAll());
     },
     [personalRoomAccess, loadAll]
@@ -1336,6 +1339,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const markMailboxNoteRead = useCallback(
     (noteId: string) => {
+      setMailboxNotes((notes) =>
+        notes.map((n) => (n.id === noteId ? { ...n, read: true } : n))
+      );
       void updateMailboxNoteRead(noteId).then(() => loadAll());
     },
     [loadAll]
