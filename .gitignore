@@ -4,4 +4,4 @@ dist
 *.local
 .env
 /database
-.cursor
+.cursor/debug-ca7e84.log
