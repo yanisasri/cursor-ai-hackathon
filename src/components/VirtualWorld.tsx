@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getVelocityFromHeldKeys, useHeldKeys } from "../hooks/useHeldKeys";
+import type { VoiceChatState } from "../hooks/useVoiceChat";
 import { useApp } from "../context/AppContext";
 import { AvatarPreview } from "./AvatarPreview";
+import { VoiceChatPanel } from "./VoiceChatPanel";
 import { DEFAULT_AVATAR, getDisplayAvatar, isPersonalRoomFull, type PersonalRoomAccess, type SubRoomType } from "../types";
+
+interface VoiceContextProps {
+  title: string;
+  participantNames: Record<string, string>;
+  voice: VoiceChatState;
+}
 
 interface Props {
   roomId: string;
@@ -11,6 +19,7 @@ interface Props {
   activeSubRoom: SubRoomType;
   activePersonalOwner?: string | null;
   onEnterSubRoom: (zone: SubRoomType, ownerId?: string) => void;
+  voiceContext?: VoiceContextProps | null;
 }
 
 interface Player {
@@ -546,6 +555,7 @@ export function VirtualWorld({
   activeSubRoom,
   activePersonalOwner,
   onEnterSubRoom,
+  voiceContext,
 }: Props) {
   const {
     user,
@@ -559,7 +569,6 @@ export function VirtualWorld({
   const [target, setTarget] = useState<{ x: number; y: number } | null>(null);
   const [personalPromptOwnerId, setPersonalPromptOwnerId] = useState<string | null>(null);
   const [others, setOthers] = useState<Player[]>([]);
-  const [voiceOn, setVoiceOn] = useState(false);
   const heldKeysRef = useHeldKeys(true);
   const lastZoneRef = useRef<string | null>(null);
 
@@ -987,16 +996,19 @@ export function VirtualWorld({
             {k === "w" ? "↑" : k === "s" ? "↓" : k === "a" ? "←" : "→"}
           </button>
         ))}
-        <button
-          type="button"
-          className={`rounded-lg px-4 py-2 text-sm font-medium ${
-            voiceOn ? "bg-green-600 text-white" : "bg-cozy-200"
-          }`}
-          onClick={() => setVoiceOn(!voiceOn)}
-        >
-          {voiceOn ? "Voice: On (demo)" : "Voice: Off"}
-        </button>
       </div>
+
+      {voiceContext &&
+        (activeSubRoom === "living" ||
+          (activeSubRoom === "personal" && activePersonalOwner)) && (
+          <VoiceChatPanel
+            title={voiceContext.title}
+            description=""
+            participantNames={voiceContext.participantNames}
+            voice={voiceContext.voice}
+            compact
+          />
+        )}
     </div>
   );
 }
