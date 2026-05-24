@@ -2,6 +2,8 @@
 
 A low-pressure virtual social hub for the Cursor AI Hackathon (2026) — hang out online without needing a reason.
 
+Discord requires someone to start a voice call. Zoom needs a meeting. Games require everyone to own the same thing. There's no place where you can just "be around" friends without the mental pressure. **Hangout Hub** is that place!
+
 **Hangout Hub** is a low-pressure social platform: customizable avatars, virtual hangout spaces, shared calendars, decision tools, and friend coordination (max 8 people per room).
 
 **Live app:** [hangout-hub.vercel.app](http://hangout-hub.vercel.app)
