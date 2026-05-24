@@ -113,6 +113,17 @@ export function presenceDotClass(presence: UserPresence): string {
   }
 }
 
+export function presenceAvatarRingClass(presence: UserPresence): string {
+  switch (presence) {
+    case "online":
+      return "bg-green-100 ring-2 ring-green-400";
+    case "idle":
+      return "bg-amber-100 ring-2 ring-amber-400";
+    default:
+      return "bg-cozy-200 ring-2 ring-cozy-300";
+  }
+}
+
 export type RoomArea = "house" | "office" | "cafe" | "park";
 
 export type SubRoomType =

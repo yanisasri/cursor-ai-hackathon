@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useApp } from "../context/AppContext";
-import type { VirtualRoom, RoomArea } from "../types";
+import { presenceAvatarRingClass, presenceLabel, type VirtualRoom, type RoomArea } from "../types";
 import { AvatarPreview } from "./AvatarPreview";
 import { ConfirmDialog } from "./ConfirmDialog";
 
@@ -38,8 +38,8 @@ function RoomMemberPreview({
           {visible.map((member) => (
             <div
               key={member.id}
-              className="rounded-full bg-white/80 p-1 shadow-md ring-2 ring-white"
-              title={member.displayName}
+              className={`rounded-full p-1 shadow-md ${presenceAvatarRingClass(member.presence)}`}
+              title={`${member.displayName} · ${presenceLabel(member.presence)}`}
             >
               <AvatarPreview avatar={member.avatar} size="md" scale={0.92} />
             </div>
