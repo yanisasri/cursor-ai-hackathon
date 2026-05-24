@@ -14,7 +14,6 @@ import type {
   VirtualRoom,
 } from "../types";
 import { ARCHIVE_DAYS, DEFAULT_AVATAR } from "../types";
-import { DEBUG_CONFIG } from "../config/supabase";
 import { supabaseApi } from "./supabaseApi";
 
 const KEYS = {
@@ -459,9 +458,6 @@ export async function createUser(
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to create account.";
-    // #region agent log
-    fetch(DEBUG_CONFIG.endpoint,{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':DEBUG_CONFIG.sessionId},body:JSON.stringify({sessionId:DEBUG_CONFIG.sessionId,runId:'pre-fix',hypothesisId:'H4',location:'src/lib/storage.ts:createUser',message:'createUser caught createAccount failure',data:{normalizedEmail:normalized,errorMessage:message},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     if (message.toLowerCase().includes("duplicate")) {
       return { ok: false, error: "An account with this email already exists." };
     }

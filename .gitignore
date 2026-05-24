@@ -5,3 +5,4 @@ dist
 .env
 /database
 .cursor/debug-ca7e84.log
+package-lock.json

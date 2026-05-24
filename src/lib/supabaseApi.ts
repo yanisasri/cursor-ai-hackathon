@@ -13,7 +13,6 @@ import type {
   VirtualRoom,
 } from "../types";
 import { DEFAULT_AVATAR, SUGGESTION_CATEGORIES } from "../types";
-import { DEBUG_CONFIG } from "../config/supabase";
 
 function throwIfError(error: { message: string } | null): void {
   if (error) throw new Error(error.message);
@@ -82,9 +81,6 @@ export const supabaseApi = {
     avatar: User["avatar"];
     avatarCustomized: boolean;
   }): Promise<void> {
-    // #region agent log
-    fetch(DEBUG_CONFIG.endpoint,{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':DEBUG_CONFIG.sessionId},body:JSON.stringify({sessionId:DEBUG_CONFIG.sessionId,runId:'pre-fix',hypothesisId:'H1',location:'src/lib/supabaseApi.ts:createAccount',message:'avatar payload shape before user_avatars upsert',data:{userId:input.id,hasLorelei:{seed:typeof input.avatar.seed==='string',hairIndex:typeof input.avatar.hairIndex==='number',eyesIndex:typeof input.avatar.eyesIndex==='number',mouthIndex:typeof input.avatar.mouthIndex==='number'},legacyValues:{hairstyle:((input.avatar as unknown) as Record<string,unknown>).hairstyle ?? null,shirtStyle:((input.avatar as unknown) as Record<string,unknown>).shirtStyle ?? null,bottomStyle:((input.avatar as unknown) as Record<string,unknown>).bottomStyle ?? null,accessory:((input.avatar as unknown) as Record<string,unknown>).accessory ?? null}},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     const { error: userError } = await supabase.from("users").insert({
       id: input.id,
       email: input.email.toLowerCase(),
@@ -109,9 +105,6 @@ export const supabaseApi = {
       freckles: input.avatar.freckles,
       avatar_customized: input.avatarCustomized,
     });
-    // #region agent log
-    fetch(DEBUG_CONFIG.endpoint,{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':DEBUG_CONFIG.sessionId},body:JSON.stringify({sessionId:DEBUG_CONFIG.sessionId,runId:'pre-fix',hypothesisId:'H2',location:'src/lib/supabaseApi.ts:createAccount',message:'user_avatars upsert result',data:{userId:input.id,errorMessage:avatarError?.message ?? null},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     throwIfError(avatarError);
   },
 
@@ -148,9 +141,6 @@ export const supabaseApi = {
     throwIfError(usersError);
     throwIfError(avatarsError);
     throwIfError(friendshipsError);
-    // #region agent log
-    fetch(DEBUG_CONFIG.endpoint,{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':DEBUG_CONFIG.sessionId},body:JSON.stringify({sessionId:DEBUG_CONFIG.sessionId,runId:'pre-fix',hypothesisId:'H3',location:'src/lib/supabaseApi.ts:getUsers',message:'avatar row schema snapshot from DB',data:{avatarCount:(avatars??[]).length,sample:(avatars??[]).slice(0,1).map((a)=>({user_id:String(a.user_id),hairstyle:a.hairstyle ?? null,shirt_style:a.shirt_style ?? null,bottom_style:a.bottom_style ?? null,accessory:a.accessory ?? null,skin_tone:a.skin_tone ?? null}))},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     const avatarMap = new Map(
       (avatars ?? []).map((a) => [
         String(a.user_id),
